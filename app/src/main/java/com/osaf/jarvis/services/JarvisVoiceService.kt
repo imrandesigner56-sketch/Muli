@@ -9,13 +9,16 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.osaf.jarvis.JarvisApplication
 import com.osaf.jarvis.notifications.NotificationHelper
+import com.osaf.jarvis.ui.overlay.JarvisOverlayActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -41,6 +44,8 @@ class JarvisVoiceService : Service() {
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var latestSensitivity = 0.65f
+    private var latestAssistantName = "JARVIS"
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -83,17 +88,14 @@ class JarvisVoiceService : Service() {
             startForeground(NotificationHelper.FGS_NOTIFICATION_ID, notification)
         }
 
-        startWakeLoop(app)
+        observeSettingsAndStartMonitor(app)
         return START_STICKY
     }
 
-    private fun startWakeLoop(app: JarvisApplication) {
-        val coordinator = app.container.coordinator
+    private fun observeSettingsAndStartMonitor(app: JarvisApplication) {
         val wakeEngine = app.container.wakeWordEngine
         val settingsRepo = app.container.settingsRepository
 
-        var latestSensitivity = 0.65f
-        var latestAssistantName = "JARVIS"
         serviceScope.launch {
             settingsRepo.settingsFlow.collect { s ->
                 latestSensitivity = s.wakeWordSensitivity
@@ -106,6 +108,14 @@ class JarvisVoiceService : Service() {
             }
         }
 
+        armWakeMonitor(app)
+    }
+
+    private fun armWakeMonitor(app: JarvisApplication) {
+        val coordinator = app.container.coordinator
+        val wakeEngine = app.container.wakeWordEngine
+        val settingsRepo = app.container.settingsRepository
+
         wakeEngine.startEnergyMonitoring(
             scope = serviceScope,
             getSensitivity = { latestSensitivity },
@@ -113,10 +123,27 @@ class JarvisVoiceService : Service() {
                 serviceScope.launch {
                     val currentSettings = settingsRepo.settingsFlow.first()
                     if (!currentSettings.wakeWordEnabled) return@launch
-                    wakeEngine.setPaused(true)
+
                     coordinator.triggerWakePhraseVerification(
                         assistantName = latestAssistantName,
-                        onFinished = { wakeEngine.setPaused(false) }
+                        onWakeConfirmed = {
+                            // If app is in background & overlay permission granted, show Gemini-style bottom overlay
+                            if (!coordinator.isAppInForeground.value && Settings.canDrawOverlays(this@JarvisVoiceService)) {
+                                val overlayIntent = Intent(this@JarvisVoiceService, JarvisOverlayActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                }
+                                startActivity(overlayIntent)
+                            }
+                        },
+                        onFinished = {
+                            serviceScope.launch {
+                                delay(400L)
+                                val stillEnabled = settingsRepo.settingsFlow.first().wakeWordEnabled
+                                if (stillEnabled) {
+                                    armWakeMonitor(app)
+                                }
+                            }
+                        }
                     )
                 }
             },

@@ -12,23 +12,20 @@ class OfflineAiEngine {
     ): String {
         return when (language) {
             LanguageMode.URDU -> buildString {
-                append("جناب $userDisplayName، میں اس وقت آف لائن موڈ میں ہوں۔ ")
-                append("میں بنیادی کمانڈز، حساب کتاب، نوٹس، ریمائنڈرز، بیٹری، فلیش لائٹ اور ایپس کھولنے میں مدد کر سکتا ہوں۔ ")
-                append("مکمل AI گفتگو کے لیے آن لائن موڈ اور API کی ترتیبات فعال کریں۔")
+                append("ارے $userDisplayName، میں اس وقت آف لائن ہوں، اس لیے گہری گفتگو کے لیے انٹرنیٹ اور API چاہیے ہوگی۔ ")
+                append("لیکن فکر نہ کریں — میں ابھی بھی آپ کے لیے ایپس کھول سکتا ہوں، حساب کتاب، نوٹس، ریمائنڈر، بیٹری اور فلیش لائٹ سب ہینڈل کر سکتا ہوں!")
                 if (!reason.isNullOrBlank()) append("\n($reason)")
             }
 
             LanguageMode.ROMAN_URDU -> buildString {
-                append("$userDisplayName, main is waqt Offline Mode mein hoon. ")
-                append("Main offline commands, hisab (calculations), notes, reminders, battery status, flashlight aur apps open kar sakta hoon. ")
-                append("Full AI conversation ke liye internet aur API settings configure karein.")
+                append("Yaar $userDisplayName, main abhi Offline Mode mein hoon is liye lambi AI baatein karne ke liye internet aur API chahiye hogi. ")
+                append("Lekin tension na lein — apps kholna, flashlight, battery, alarm, timer, notes aur hisab kitab main abhi bhi kar sakta hoon!")
                 if (!reason.isNullOrBlank()) append("\n($reason)")
             }
 
             else -> buildString {
-                append("$userDisplayName, I am currently operating in Offline Mode. ")
-                append("No local LLM is installed, so full conversational AI requires an active internet connection and configured API key. ")
-                append("Offline, I can still run calculations, save notes and reminders, check battery/time, toggle the flashlight, and launch apps.")
+                append("Hey $userDisplayName! I'm offline right now, so I can't reach the cloud brain for deep questions just yet. ")
+                append("Still, I'm right here for you — I can open apps, do math, save notes and reminders, check your battery, set alarms, or flip on the flashlight anytime!")
                 if (!reason.isNullOrBlank()) append("\n($reason)")
             }
         }
@@ -41,13 +38,13 @@ class OfflineAiEngine {
     ): String {
         return when (language) {
             LanguageMode.URDU ->
-                "جناب $userDisplayName، میں $assistantName ہوں۔ میں ایپس کھول سکتا ہوں، فلیش لائٹ کنٹرول کر سکتا ہوں، بیٹری اور وقت بتا سکتا ہوں، الارم اور ٹائمر سیٹ کر سکتا ہوں، حساب کر سکتا ہوں، نوٹس محفوظ کر سکتا ہوں، اور آن لائن AI سے سوالات کے جواب دے سکتا ہوں۔"
+                "جی $userDisplayName، میں $assistantName ہوں — آپ کا دوست اور اسسٹنٹ! آپ مجھ سے ایپس کھلوا سکتے ہیں، فلیش لائٹ یا والیوم کنٹرول کروا سکتے ہیں، بیٹری اور وقت پوچھ سکتے ہیں، الارم اور ٹائمر لگوا سکتے ہیں، نوٹس لکھوا سکتے ہیں، یا آن لائن AI سے کسی بھی موضوع پر بات کر سکتے ہیں۔"
 
             LanguageMode.ROMAN_URDU ->
-                "$userDisplayName, main $assistantName hoon. Main YouTube/WhatsApp ya koi bhi app khol sakta hoon, flashlight aur volume control kar sakta hoon, battery aur date/time bata sakta hoon, alarm aur timer laga sakta hoon, math solve kar sakta hoon, notes/reminders save kar sakta hoon, aur online AI se madad kar sakta hoon."
+                "Arre $userDisplayName, main $assistantName hoon — bilkul aapke dost ki tarah! Main YouTube ya WhatsApp khol sakta hoon, flashlight aur awaz control kar sakta hoon, alarm aur timer laga sakta hoon, notes yaad rakh sakta hoon, aur online hone par kisi bhi cheez par baat kar sakta hoon."
 
             else ->
-                "$userDisplayName, I am OSAF $assistantName. I can launch installed apps, control the flashlight and media volume, check battery and date/time, set alarms and timers, solve calculations, manage local notes and reminders, prepare calls or SMS with your confirmation, and connect to your configured Online AI model."
+                "Hey $userDisplayName! Think of me as your everyday companion. I can open your favorite apps, toggle your flashlight, check battery or time, set timers and alarms, crunch numbers, remember notes and reminders, and chat about anything when we're online!"
         }
     }
 }

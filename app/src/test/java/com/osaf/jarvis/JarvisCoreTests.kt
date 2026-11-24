@@ -56,10 +56,12 @@ class JarvisCoreTests {
     }
 
     @Test
-    fun `wake word matcher detects Hey JARVIS and JARVIS`() {
+    fun `wake word matcher detects Hey JARVIS and phonetic variants`() {
         val engine = WakeWordEngine()
         assertTrue(engine.matchesWakePhrase("Hey JARVIS open YouTube", "JARVIS"))
         assertTrue(engine.matchesWakePhrase("jarvis battery kitni hai", "JARVIS"))
+        assertTrue(engine.matchesWakePhrase("a jarvis", "JARVIS"))
+        assertTrue(engine.matchesWakePhrase("hey jarvish", "JARVIS"))
         assertFalse(engine.matchesWakePhrase("open youtube please", "JARVIS"))
     }
 
@@ -67,10 +69,10 @@ class JarvisCoreTests {
     fun `offline ai engine generates localized honest responses`() {
         val offline = OfflineAiEngine()
         val en = offline.buildOfflineFallbackResponse("Sir", "JARVIS", LanguageMode.ENGLISH)
-        assertTrue(en.contains("Sir") && en.contains("Offline Mode"))
+        assertTrue(en.contains("Sir") && en.contains("offline", ignoreCase = true))
 
         val ru = offline.buildOfflineFallbackResponse("Sir", "JARVIS", LanguageMode.ROMAN_URDU)
-        assertTrue(ru.contains("Sir") && ru.contains("Offline Mode"))
+        assertTrue(ru.contains("Sir") && ru.contains("Offline Mode", ignoreCase = true))
 
         val ur = offline.buildOfflineFallbackResponse("Sir", "JARVIS", LanguageMode.URDU)
         assertTrue(ur.contains("Sir") && ur.contains("آف لائن"))

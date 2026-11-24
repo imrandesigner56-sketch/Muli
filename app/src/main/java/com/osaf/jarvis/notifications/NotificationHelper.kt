@@ -29,10 +29,12 @@ object NotificationHelper {
         val voiceChannel = NotificationChannel(
             CHANNEL_VOICE_SERVICE,
             context.getString(R.string.fgs_channel_name),
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_MIN
         ).apply {
             description = context.getString(R.string.fgs_channel_desc)
             setShowBadge(false)
+            setSound(null, null)
+            enableVibration(false)
         }
 
         val reminderChannel = NotificationChannel(
@@ -68,13 +70,14 @@ object NotificationHelper {
             .setContentText(context.getString(R.string.fgs_notification_body, wakePhrase))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setSilent(true)
             .setContentIntent(openAppIntent)
             .addAction(
                 android.R.drawable.ic_media_pause,
                 context.getString(R.string.fgs_action_stop),
                 stopIntent
             )
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
     }
 

@@ -1,5 +1,6 @@
 package com.osaf.jarvis.commands
 
+import android.content.Context
 import com.osaf.jarvis.ai.OfflineAiEngine
 import com.osaf.jarvis.database.MemoryRepository
 import com.osaf.jarvis.database.SettingsRepository
@@ -10,10 +11,8 @@ import com.osaf.jarvis.utils.LanguageDetector
 import com.osaf.jarvis.utils.LanguageMode
 import com.osaf.jarvis.utils.MathEvaluator
 import com.osaf.jarvis.utils.MathResult
-import android.content.Context
 import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -47,7 +46,7 @@ class CommandInterpreter(
     fun stripWakePhrase(raw: String, assistantName: String): String {
         val escapedName = Regex.escape(assistantName.trim().ifEmpty { "JARVIS" })
         val pattern = Regex(
-            """^(?:hey\s+$escapedName|ok\s+$escapedName|hi\s+$escapedName|hello\s+$escapedName|$escapedName|hey\s+jarvis|jarvis)\s*[,:\-!\s]*""",
+            """^(?:hey\s+$escapedName|ok\s+$escapedName|hi\s+$escapedName|hello\s+$escapedName|a\s+$escapedName|$escapedName|hey\s+jarvis|hi\s+jarvis|ok\s+jarvis|a\s+jarvis|jarvis|jarvish|jarves)\s*[,:\-!\s]*""",
             RegexOption.IGNORE_CASE
         )
         return raw.trim().replaceFirst(pattern, "").trim()
@@ -60,23 +59,20 @@ class CommandInterpreter(
         val cleaned = stripWakePhrase(rawInput, assistant)
         val lang = LanguageDetector.detect(rawInput, settings.preferredLanguage)
 
-        // If user only said the wake phrase
         if (cleaned.isBlank()) {
             return CommandOutcome.Handled(
-                responseText = greetingText(user, lang, intro = true),
+                responseText = greetingText(user, lang),
                 language = lang
             )
         }
 
         val lower = cleaned.lowercase().trim()
 
-        // 1. Greetings / Identity
-        if (matchesGreeting(lower)) {
-            return CommandOutcome.Handled(
-                responseText = greetingText(user, lang, intro = true),
-                language = lang
-            )
+        // 1. Warm Human Small Talk & Greetings
+        handleFriendlySmallTalk(lower, user, assistant, lang)?.let { reply ->
+            return CommandOutcome.Handled(reply, lang)
         }
+
         if (matchesCapabilities(lower)) {
             return CommandOutcome.Handled(
                 responseText = offlineAiEngine.buildCapabilitiesResponse(user, assistant, lang),
@@ -88,35 +84,43 @@ class CommandInterpreter(
         if (containsAny(lower, listOf("offline mode", "use offline", "go offline", "offline chalao", "offline use karo"))) {
             settingsRepository.setPreferOnlineMode(false)
             val msg = when (lang) {
-                LanguageMode.URDU -> "جی $user، آف لائن موڈ فعال کر دیا گیا ہے۔"
-                LanguageMode.ROMAN_URDU -> "Ji $user, Offline Mode activate kar diya gaya hai."
-                else -> "Understood, $user. Switching to Offline Mode."
+                LanguageMode.URDU -> "جی بالکل $user، میں نے آف لائن موڈ آن کر دیا ہے۔"
+                LanguageMode.ROMAN_URDU -> "Ji bilkul $user! Maine Offline Mode on kar diya hai, ab bina internet kaam chalega."
+                else -> "Got it, $user! Switched over to Offline Mode for you."
             }
             return CommandOutcome.Handled(msg, lang)
         }
         if (containsAny(lower, listOf("online mode", "use online", "go online", "online chalao", "online use karo"))) {
             settingsRepository.setPreferOnlineMode(true)
             val msg = when (lang) {
-                LanguageMode.URDU -> "جی $user، آن لائن موڈ فعال کر دیا گیا ہے۔"
-                LanguageMode.ROMAN_URDU -> "Ji $user, Online Mode activate kar diya gaya hai."
-                else -> "Understood, $user. Online AI Mode is now enabled."
+                LanguageMode.URDU -> "جی $user، آن لائن AI موڈ فعال کر دیا گیا ہے!"
+                LanguageMode.ROMAN_URDU -> "Done $user! Online AI Mode wapas on kar diya hai."
+                else -> "All set, $user! Online AI Mode is active now."
             }
             return CommandOutcome.Handled(msg, lang)
         }
 
         // 3. Flashlight Control
         if (containsAny(lower, listOf("flashlight", "torch", "flash light")) ||
-            (lower.contains("light") && containsAny(lower, listOf("on", "off", "kholo", "band", "chalu")))
+            (lower.contains("light") && containsAny(lower, listOf("on", "off", "kholo", "band", "chalu", "jalao")))
         ) {
             val turnOn = containsAny(lower, listOf("on", "enable", "start", "chalu", "jalao", "kholo"))
             val turnOff = containsAny(lower, listOf("off", "disable", "stop", "band", "bujhao"))
-            return when {
-                turnOn && !turnOff -> formatDeviceResult(deviceController.setFlashlight(true), lang, user)
-                turnOff && !turnOn -> formatDeviceResult(deviceController.setFlashlight(false), lang, user)
-                else -> {
-                    val next = !deviceController.isFlashlightOn.value
-                    formatDeviceResult(deviceController.setFlashlight(next), lang, user)
+            val enable = when {
+                turnOn && !turnOff -> true
+                turnOff && !turnOn -> false
+                else -> !deviceController.isFlashlightOn.value
+            }
+            return when (val res = deviceController.setFlashlight(enable)) {
+                is DeviceActionResult.Success -> {
+                    val reply = when (lang) {
+                        LanguageMode.URDU -> if (enable) "جی $user، فلیش لائٹ آن کر دی ہے۔" else "جی $user، فلیش لائٹ بند کر دی ہے۔"
+                        LanguageMode.ROMAN_URDU -> if (enable) "Lo ji $user, flashlight on kar di hai!" else "Theek hai $user, flashlight band kar di hai."
+                        else -> if (enable) "Sure thing, $user — flashlight is on!" else "Got it, $user — flashlight is off now."
+                    }
+                    CommandOutcome.Handled(reply, lang)
                 }
+                is DeviceActionResult.Error -> CommandOutcome.Handled("Sorry $user, ${res.message}", lang)
             }
         }
 
@@ -124,22 +128,28 @@ class CommandInterpreter(
         if (containsAny(lower, listOf("battery", "charging", "bettery"))) {
             val status = deviceController.getBatteryStatus()
             val msg = when (lang) {
-                LanguageMode.URDU -> "$user، بیٹری اس وقت ${status.percentage}% ہے (${status.statusLabel})۔"
-                LanguageMode.ROMAN_URDU -> "$user, is waqt battery ${status.percentage}% hai (${status.statusLabel})."
-                else -> "$user, battery is currently at ${status.percentage}% (${status.statusLabel})."
+                LanguageMode.URDU -> "$user، اس وقت بیٹری ${status.percentage}% ہے (${status.statusLabel})۔"
+                LanguageMode.ROMAN_URDU -> when {
+                    status.percentage >= 70 -> "$user, battery abhi ${status.percentage}% hai (${status.statusLabel}) — kaafi time aaram se chal jayegi!"
+                    status.percentage <= 20 -> "$user, battery sirf ${status.percentage}% reh gayi hai (${status.statusLabel}), charger laga lena behtar hoga."
+                    else -> "$user, is waqt battery ${status.percentage}% hai (${status.statusLabel})."
+                }
+                else -> when {
+                    status.percentage >= 70 -> "Looking good, $user! Battery is at ${status.percentage}% (${status.statusLabel})."
+                    status.percentage <= 20 -> "Heads up $user — battery is down to ${status.percentage}% (${status.statusLabel}). You might want to plug in soon."
+                    else -> "Your battery is at ${status.percentage}% right now ($user, ${status.statusLabel})."
+                }
             }
             return CommandOutcome.Handled(msg, lang)
         }
 
         // 5. Date and Time
-        if (containsAny(lower, listOf("date", "tareekh", "tarikh", "today", "aaj ki")) &&
-            !lower.contains("update")
-        ) {
+        if (containsAny(lower, listOf("date", "tareekh", "tarikh", "today", "aaj ki")) && !lower.contains("update")) {
             val (date, time) = deviceController.getCurrentDateTimeFormatted()
             val msg = when (lang) {
                 LanguageMode.URDU -> "$user، آج کی تاریخ $date ہے اور وقت $time ہے۔"
-                LanguageMode.ROMAN_URDU -> "$user, aaj ki tareekh $date hai aur waqt $time hai."
-                else -> "$user, today is $date, and the current time is $time."
+                LanguageMode.ROMAN_URDU -> "$user, aaj ki tareekh $date hai aur abhi $time ho rahe hain."
+                else -> "Today is $date, $user — and it's $time right now."
             }
             return CommandOutcome.Handled(msg, lang)
         }
@@ -147,8 +157,8 @@ class CommandInterpreter(
             val (_, time) = deviceController.getCurrentDateTimeFormatted()
             val msg = when (lang) {
                 LanguageMode.URDU -> "$user، اس وقت $time بجے ہیں۔"
-                LanguageMode.ROMAN_URDU -> "$user, is waqt $time ho rahe hain."
-                else -> "$user, the current time is $time."
+                LanguageMode.ROMAN_URDU -> "$user, abhi $time ho rahe hain."
+                else -> "It's $time right now, $user."
             }
             return CommandOutcome.Handled(msg, lang)
         }
@@ -175,7 +185,7 @@ class CommandInterpreter(
                 return formatDeviceResult(deviceController.adjustMediaVolume(raise = false), lang, user)
             }
             val current = deviceController.getMediaVolumePercent()
-            return CommandOutcome.Handled("$user, current media volume is $current%.", lang)
+            return CommandOutcome.Handled("Media volume is at $current% right now, $user.", lang)
         }
 
         // 8. Timer
@@ -185,9 +195,9 @@ class CommandInterpreter(
                 formatDeviceResult(deviceController.setSystemTimer(seconds), lang, user)
             } else {
                 val clarify = when (lang) {
-                    LanguageMode.ROMAN_URDU -> "$user, kitne minute ya second ka timer lagana hai?"
+                    LanguageMode.ROMAN_URDU -> "$user, kitne minute ya second ka timer lagana hai? Bata dein abhi set kar deta hoon."
                     LanguageMode.URDU -> "$user، کتنے منٹ یا سیکنڈ کا ٹائمر لگانا ہے؟"
-                    else -> "$user, how long should I set the timer for?"
+                    else -> "Sure thing, $user — how long should I set the timer for?"
                 }
                 CommandOutcome.Handled(clarify, lang)
             }
@@ -197,16 +207,12 @@ class CommandInterpreter(
         if (lower.contains("alarm")) {
             val parsedTime = parseAlarmHourMinute(lower)
             return if (parsedTime != null) {
-                formatDeviceResult(
-                    deviceController.setSystemAlarm(parsedTime.first, parsedTime.second),
-                    lang,
-                    user
-                )
+                formatDeviceResult(deviceController.setSystemAlarm(parsedTime.first, parsedTime.second), lang, user)
             } else {
                 val clarify = when (lang) {
-                    LanguageMode.ROMAN_URDU -> "$user, kis waqt ka alarm lagana hai? Masalan: subah 7 baje."
+                    LanguageMode.ROMAN_URDU -> "$user, kis waqt ka alarm lagana hai? Jaise: subah 7 baje."
                     LanguageMode.URDU -> "$user، کس وقت کا الارم لگانا ہے؟"
-                    else -> "$user, what time should I set the alarm for? For example, 7:00 AM."
+                    else -> "What time would you like the alarm for, $user? For example, 7:00 AM."
                 }
                 CommandOutcome.Handled(clarify, lang)
             }
@@ -230,9 +236,9 @@ class CommandInterpreter(
             NotificationHelper.scheduleLocalReminder(context, id, title, triggerAt)
             val timeStr = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(triggerAt))
             val msg = when (lang) {
-                LanguageMode.URDU -> "$user، ریمائنڈر محفوظ کر لیا گیا ہے: \"$title\" ($timeStr)۔"
-                LanguageMode.ROMAN_URDU -> "$user, reminder save kar liya gaya hai: \"$title\" ($timeStr)."
-                else -> "$user, I have saved your reminder: \"$title\" for $timeStr."
+                LanguageMode.URDU -> "جی $user، میں نے \"$title\" کا ریمائنڈر $timeStr کے لیے سیٹ کر دیا ہے!"
+                LanguageMode.ROMAN_URDU -> "Done $user! Maine \"$title\" ka reminder $timeStr ke liye laga diya hai, waqt par yaad dila doonga."
+                else -> "Got it, $user! I'll remind you about \"$title\" at $timeStr."
             }
             return CommandOutcome.Handled(msg, lang)
         }
@@ -242,28 +248,29 @@ class CommandInterpreter(
             val noteBody = extractNoteContent(cleaned)
             if (noteBody.isBlank()) {
                 val clarify = when (lang) {
-                    LanguageMode.URDU -> "$user، براہ کرم بتائیں کہ نوٹ میں کیا محفوظ کرنا ہے؟"
-                    LanguageMode.ROMAN_URDU -> "$user, note mein kya likhna hai? Bata dein taake main save kar doon."
-                    else -> "$user, what would you like me to save in the note?"
+                    LanguageMode.URDU -> "$user، بتائیے نوٹ میں کیا لکھ کر محفوظ کروں؟"
+                    LanguageMode.ROMAN_URDU -> "$user, note mein kya likhna hai? Bata dein taake main foran save kar loon."
+                    else -> "Of course, $user — what would you like me to write down in that note?"
                 }
                 return CommandOutcome.Handled(clarify, lang)
             }
             val title = noteBody.split(" ").take(5).joinToString(" ")
             memoryRepository.addNote(title = title, content = noteBody, category = "Voice Note", language = lang.code)
             val msg = when (lang) {
-                LanguageMode.URDU -> "$user، آپ کا نوٹ محفوظ کر لیا گیا ہے: \"$noteBody\"۔"
-                LanguageMode.ROMAN_URDU -> "$user, aapka note save kar liya gaya hai: \"$noteBody\"."
-                else -> "$user, note saved to local memory: \"$noteBody\"."
+                LanguageMode.URDU -> "محفوظ کر لیا $user: \"$noteBody\"۔"
+                LanguageMode.ROMAN_URDU -> "Save kar liya hai $user: \"$noteBody\". Jab chahein pooch lein!"
+                else -> "Saved that note for you, $user: \"$noteBody\"."
             }
             return CommandOutcome.Handled(msg, lang)
         }
         if (containsAny(lower, listOf("show notes", "my notes", "read notes", "mere notes", "notes dikhao"))) {
             val notes = memoryRepository.getNotesSnapshot()
             val msg = if (notes.isEmpty()) {
-                "$user, you currently have no saved notes."
+                if (lang == LanguageMode.ROMAN_URDU) "$user, abhi koi note save nahi hai. Jab chahein ek note likhwa dein!"
+                else "You don't have any saved notes yet, $user."
             } else {
                 val preview = notes.take(4).joinToString("\n") { "• ${it.title}: ${it.content}" }
-                "$user, here are your latest saved notes:\n$preview"
+                "Here are your latest notes, $user:\n$preview"
             }
             return CommandOutcome.Handled(msg, lang)
         }
@@ -272,9 +279,9 @@ class CommandInterpreter(
         val callTarget = extractCallTarget(cleaned)
         if (callTarget != null) {
             val msg = when (lang) {
-                LanguageMode.ROMAN_URDU -> "$user, kya main $callTarget par call dialer open karoon? Confirm karein."
+                LanguageMode.ROMAN_URDU -> "$user, kya main $callTarget par call dialer khol doon? Confirm kar dein."
                 LanguageMode.URDU -> "$user، کیا میں $callTarget پر کال کرنے کے لیے ڈائلر کھولوں؟"
-                else -> "$user, please confirm if you want me to open the dialer for $callTarget."
+                else -> "Just to be sure, $user — should I open the dialer for $callTarget?"
             }
             return CommandOutcome.Handled(
                 responseText = msg,
@@ -284,7 +291,7 @@ class CommandInterpreter(
         }
         val smsTarget = extractSmsTarget(cleaned)
         if (smsTarget != null) {
-            val msg = "$user, please confirm before opening SMS composer for ${smsTarget.first}."
+            val msg = "Just confirming, $user — ready to open your SMS app for ${smsTarget.first}?"
             return CommandOutcome.Handled(
                 responseText = msg,
                 language = lang,
@@ -303,43 +310,87 @@ class CommandInterpreter(
             return when (val result = MathEvaluator.evaluate(cleaned)) {
                 is MathResult.Success -> {
                     val msg = when (lang) {
-                        LanguageMode.URDU -> "$user، جواب ${result.formatted} ہے۔"
-                        LanguageMode.ROMAN_URDU -> "$user, iska jawab ${result.formatted} hai."
-                        else -> "$user, the answer is ${result.formatted}."
+                        LanguageMode.URDU -> "$user، اس کا جواب ${result.formatted} ہے۔"
+                        LanguageMode.ROMAN_URDU -> "$user, iska jawab ${result.formatted} aata hai!"
+                        else -> "That comes out to ${result.formatted}, $user."
                     }
                     CommandOutcome.Handled(msg, lang)
                 }
                 is MathResult.Error -> {
-                    CommandOutcome.Handled("$user, I could not calculate that: ${result.reason}", lang)
+                    CommandOutcome.Handled("Hmm $user, I couldn't compute that: ${result.reason}", lang)
                 }
             }
         }
 
-        // 16. Fallback to Online AI (or honest Offline reply)
+        // 16. Fallback to Online AI (or honest friendly Offline reply)
         return CommandOutcome.NeedsOnlineAi(cleaned, lang)
     }
 
-    private fun greetingText(user: String, lang: LanguageMode, intro: Boolean): String {
+    private fun handleFriendlySmallTalk(
+        lower: String,
+        user: String,
+        assistant: String,
+        lang: LanguageMode
+    ): String? {
+        if (lower in setOf("hello", "hi", "hey", "salam", "assalam o alaikum", "assalamualaikum", "aoa", "who are you", "introduce yourself")) {
+            return greetingText(user, lang)
+        }
+        if (containsAny(lower, listOf("kaise ho", "kya haal", "kya hal", "how are you", "how r u", "whats up", "what's up", "theek ho"))) {
+            return when (lang) {
+                LanguageMode.URDU -> "الحمدللہ میں بالکل ٹھیک ہوں $user! آپ سنائیں، آج دن کیسا گزر رہا ہے؟"
+                LanguageMode.ROMAN_URDU -> "Main bilkul fit hoon $user! Shukriya poochne ka — aap sunayein, aaj kya haal chaal hain?"
+                else -> "I'm doing great, $user! Thanks for asking — how's your day going so far?"
+            }
+        }
+        if (containsAny(lower, listOf("shukriya", "thanks", "thank you", "thankyou", "meherbani", "jazakallah"))) {
+            return when (lang) {
+                LanguageMode.URDU -> "کوئی بات نہیں $user! میں ہمیشہ آپ کی مدد کے لیے حاضر ہوں۔"
+                LanguageMode.ROMAN_URDU -> "Are koi baat nahi $user! Main hamesha aapke liye hazir hoon."
+                else -> "Anytime, $user! Always happy to help."
+            }
+        }
+        if (containsAny(lower, listOf("good morning", "subah bakhair"))) {
+            return if (lang == LanguageMode.ROMAN_URDU) "Subah bakhair $user! Umeed hai aaj ka din zabardast guzrega."
+            else "Good morning, $user! Hope today treats you wonderfully."
+        }
+        if (containsAny(lower, listOf("good night", "shab bakhair", "so ja"))) {
+            return if (lang == LanguageMode.ROMAN_URDU) "Shab bakhair $user! Aaram karein, main yahin hoon agar koi kaam ho."
+            else "Good night, $user! Get some great rest — I'm here whenever you need me."
+        }
+        if (containsAny(lower, listOf("joke", "lateefa", "hasao", "bored"))) {
+            return if (lang == LanguageMode.ROMAN_URDU) {
+                "Sunayein $user: Ek programmer apni biwi se bola 'Agar anday milen to 6 le aana.' Biwi ne kaha '6 kyun?' Bola 'Kyunke dukaan par doodh nahi tha — nahi, sorry, ulta condition lag gayi!' 😄"
+            } else {
+                "Here's one for you, $user: Why do programmers prefer dark mode? Because light attracts bugs!"
+            }
+        }
+        if (containsAny(lower, listOf("love you", "you are the best", "nice", "good job", "zabardast", "shabash"))) {
+            return if (lang == LanguageMode.ROMAN_URDU) "Aww, shukriya $user! Aapke saath kaam karke hamesha maza aata hai."
+            else "That means a lot, $user! Always got your back."
+        }
+        return null
+    }
+
+    private fun greetingText(user: String, lang: LanguageMode): String {
         return when (lang) {
-            LanguageMode.URDU -> "السلام علیکم $user، میں OSAF JARVIS ہوں۔ میں آپ کی کیا مدد کر سکتا ہوں؟"
-            LanguageMode.ROMAN_URDU -> "Assalam-o-Alaikum $user, main OSAF JARVIS hoon. Batayein main aapki kya madad kar sakta hoon?"
-            else -> if (intro) "Hello $user, I am OSAF JARVIS. How may I assist you?" else "At your service, $user."
+            LanguageMode.URDU -> "السلام علیکم $user! میں $user کا دوست OSAF JARVIS ہوں۔ بتائیے، آج کیا مدد کروں؟"
+            LanguageMode.ROMAN_URDU -> "Haan ji $user, main sun raha hoon! Batayein aaj kya help karoon?"
+            else -> "Hey $user! I'm OSAF JARVIS — right here and ready. How can I help you?"
         }
     }
 
     private fun formatDeviceResult(res: DeviceActionResult, lang: LanguageMode, user: String): CommandOutcome.Handled {
         return when (res) {
-            is DeviceActionResult.Success -> CommandOutcome.Handled("$user, ${res.message}", lang)
-            is DeviceActionResult.Error -> CommandOutcome.Handled("$user, ${res.message}", lang)
+            is DeviceActionResult.Success -> {
+                val msg = when (lang) {
+                    LanguageMode.ROMAN_URDU -> "Bilkul $user! ${res.message}"
+                    LanguageMode.URDU -> "جی $user، ${res.message}"
+                    else -> "On it, $user! ${res.message}"
+                }
+                CommandOutcome.Handled(msg, lang)
+            }
+            is DeviceActionResult.Error -> CommandOutcome.Handled("Sorry $user, ${res.message}", lang)
         }
-    }
-
-    private fun matchesGreeting(lower: String): Boolean {
-        val exact = setOf(
-            "hello", "hi", "hey", "salam", "assalam o alaikum", "assalamualaikum",
-            "good morning", "good evening", "good afternoon", "who are you", "introduce yourself"
-        )
-        return lower in exact
     }
 
     private fun matchesCapabilities(lower: String): Boolean {
@@ -365,7 +416,6 @@ class CommandInterpreter(
 
     private fun parseAlarmHourMinute(lower: String): Pair<Int, Int>? {
         val timeRegex = Regex("""(\d{1,2})(?::(\d{2}))?\s*(am|pm|subah|shaam|raat|baje)?""")
-        // Find a numeric match that isn't just random
         for (m in timeRegex.findAll(lower)) {
             val rawHour = m.groupValues[1].toIntOrNull() ?: continue
             if (rawHour > 23) continue
@@ -434,10 +484,9 @@ class CommandInterpreter(
     }
 
     private fun extractNoteContent(cleaned: String): String {
-        val stripped = cleaned
+        return cleaned
             .replace(Regex("""(?i)^(?:please\s+)?(?:ek\s+)?(?:save\s+a?\s*note|note\s+save\s+karo|ek\s+note\s+save\s+karo|take\s+a\s+note|add\s+note|note\s+likho)\s*(?:that|ke|ki|:|-)?\s*"""), "")
             .trim()
-        return stripped
     }
 
     private fun extractCallTarget(cleaned: String): String? {

@@ -28,12 +28,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class ReactorState(val label: String) {
-    IDLE("STANDBY"),
+    IDLE("READY"),
     LISTENING("LISTENING"),
-    THINKING("PROCESSING"),
+    THINKING("THINKING"),
     SPEAKING("SPEAKING"),
-    OFFLINE("OFFLINE MODE"),
-    ERROR("ATTENTION")
+    OFFLINE("OFFLINE"),
+    ERROR("ISSUE")
 }
 
 class JarvisCoordinator(
@@ -56,7 +56,7 @@ class JarvisCoordinator(
     private val _lastTranscript = MutableStateFlow("")
     val lastTranscript: StateFlow<String> = _lastTranscript.asStateFlow()
 
-    private val _lastResponse = MutableStateFlow("Hello Sir, I am OSAF JARVIS. How may I assist you?")
+    private val _lastResponse = MutableStateFlow("Hey Sir! I'm JARVIS — tap the mic or say \"Hey JARVIS\" anytime.")
     val lastResponse: StateFlow<String> = _lastResponse.asStateFlow()
 
     private val _streamingResponse = MutableStateFlow("")
@@ -64,6 +64,12 @@ class JarvisCoordinator(
 
     private val _pendingConfirmation = MutableStateFlow<PendingConfirmation?>(null)
     val pendingConfirmation: StateFlow<PendingConfirmation?> = _pendingConfirmation.asStateFlow()
+
+    private val _isBottomPopupVisible = MutableStateFlow(false)
+    val isBottomPopupVisible: StateFlow<Boolean> = _isBottomPopupVisible.asStateFlow()
+
+    private val _isAppInForeground = MutableStateFlow(false)
+    val isAppInForeground: StateFlow<Boolean> = _isAppInForeground.asStateFlow()
 
     val isOnlineActive: StateFlow<Boolean> = combine(
         deviceController.isNetworkConnected,
@@ -92,8 +98,25 @@ class JarvisCoordinator(
     private var lastProcessedText = ""
     private var lastProcessedAt = 0L
 
-    fun startVoiceCommand() {
+    fun setAppForeground(inForeground: Boolean) {
+        _isAppInForeground.value = inForeground
+    }
+
+    fun openBottomPopup() {
+        _isBottomPopupVisible.value = true
+    }
+
+    fun dismissBottomPopup() {
+        _isBottomPopupVisible.value = false
+        voiceEngine.cancelListening()
         _errorBanner.value = null
+    }
+
+    fun startVoiceCommand(openBottomSheet: Boolean = true) {
+        _errorBanner.value = null
+        if (openBottomSheet) {
+            _isBottomPopupVisible.value = true
+        }
         scope.launch {
             val settings = settingsRepository.settingsFlow.first()
             val online = deviceController.isNetworkConnected.value && settings.preferOnlineMode
@@ -122,7 +145,11 @@ class JarvisCoordinator(
         _errorBanner.value = null
     }
 
-    fun triggerWakePhraseVerification(assistantName: String, onFinished: () -> Unit) {
+    fun triggerWakePhraseVerification(
+        assistantName: String,
+        onWakeConfirmed: () -> Unit,
+        onFinished: () -> Unit
+    ) {
         scope.launch {
             val settings = settingsRepository.settingsFlow.first()
             val online = deviceController.isNetworkConnected.value && settings.preferOnlineMode
@@ -131,13 +158,20 @@ class JarvisCoordinator(
                 preferOffline = !online,
                 onResult = { transcript ->
                     if (wakeWordEngine.matchesWakePhrase(transcript, assistantName)) {
+                        _isBottomPopupVisible.value = true
+                        onWakeConfirmed()
                         val remainder = commandInterpreter.stripWakePhrase(transcript, assistantName)
                         if (remainder.isNotBlank()) {
                             submitUserInput(transcript, fromVoice = true)
                             onFinished()
                         } else {
-                            // Greet & listen immediately for follow-up command
-                            val greet = "Yes ${settings.userDisplayName}?"
+                            // Warm wake response & listen immediately for follow-up command inside bottom sheet
+                            val greet = if (settings.preferredLanguage == LanguageMode.ROMAN_URDU) {
+                                "Haan ji ${settings.userDisplayName}, main sun raha hoon! Batayein?"
+                            } else {
+                                "Hey ${settings.userDisplayName}! I'm listening — what's up?"
+                            }
+                            _lastTranscript.value = transcript
                             _lastResponse.value = greet
                             if (settings.ttsAutoSpeak) {
                                 voiceEngine.speak(
@@ -148,8 +182,17 @@ class JarvisCoordinator(
                                     settings.selectedVoiceName
                                 )
                             }
-                            startVoiceCommand()
-                            onFinished()
+                            voiceEngine.startListening(
+                                languageMode = settings.preferredLanguage,
+                                preferOffline = !online,
+                                onResult = { followUp ->
+                                    submitUserInput(followUp, fromVoice = true)
+                                    onFinished()
+                                },
+                                onError = {
+                                    onFinished()
+                                }
+                            )
                         }
                     } else {
                         onFinished()
@@ -191,14 +234,13 @@ class JarvisCoordinator(
 
     fun cancelPendingAction() {
         _pendingConfirmation.value = null
-        _lastResponse.value = "Action cancelled, Sir."
+        _lastResponse.value = "No problem, cancelled that for you, Sir."
     }
 
     fun submitUserInput(rawText: String, fromVoice: Boolean = false) {
         val trimmed = rawText.trim()
         if (trimmed.isEmpty()) return
 
-        // Duplicate command execution guard (1.5s window)
         val now = System.currentTimeMillis()
         if (trimmed.equals(lastProcessedText, ignoreCase = true) && (now - lastProcessedAt) < 1500L) {
             return
@@ -235,9 +277,9 @@ class JarvisCoordinator(
 
                         if (!settings.preferOnlineMode || !hasNet || apiKey.isBlank()) {
                             val reason = when {
-                                !settings.preferOnlineMode -> "Online Mode is disabled in Settings."
-                                !hasNet -> "No internet connection detected."
-                                else -> "No API key configured in Settings."
+                                !settings.preferOnlineMode -> "Online Mode is switched off in Settings."
+                                !hasNet -> "No internet connection right now."
+                                else -> "Add your API key in Settings to enable cloud replies."
                             }
                             val fallback = offlineAiEngine.buildOfflineFallbackResponse(
                                 userDisplayName = settings.userDisplayName,
@@ -287,7 +329,7 @@ class JarvisCoordinator(
                                     _streamingResponse.value = ""
                                     _isThinking.value = false
                                     _errorBanner.value = event.message
-                                    val safeMsg = "${settings.userDisplayName}, ${event.message}"
+                                    val safeMsg = "Sorry ${settings.userDisplayName}, ${event.message}"
                                     _lastResponse.value = safeMsg
                                     if (settings.saveChatHistory) {
                                         chatRepository.addMessage("assistant", safeMsg, outcome.language.code, "error")

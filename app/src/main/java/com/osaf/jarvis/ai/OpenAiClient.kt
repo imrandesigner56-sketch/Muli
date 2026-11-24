@@ -52,9 +52,9 @@ class OpenAiClient {
         sharedNotes: List<NoteEntity>
     ): String {
         val langInstruction = when (detectedLanguage) {
-            LanguageMode.URDU -> "Respond naturally in polite Urdu script (اردو) while addressing the user as '${settings.userDisplayName}'."
-            LanguageMode.ROMAN_URDU -> "Respond naturally in clear, polite Roman Urdu while addressing the user as '${settings.userDisplayName}'."
-            else -> "Respond naturally in clear, calm, intelligent English while addressing the user as '${settings.userDisplayName}'."
+            LanguageMode.URDU -> "Speak warmly and naturally in conversational Urdu (اردو), addressing the user casually and respectfully as '${settings.userDisplayName}'."
+            LanguageMode.ROMAN_URDU -> "Speak warmly and naturally in friendly everyday Roman Urdu (like a supportive real human friend), addressing the user as '${settings.userDisplayName}'."
+            else -> "Speak warmly, naturally, and concisely like a genuinely friendly human companion (use natural contractions, empathy, and light warmth), addressing the user as '${settings.userDisplayName}'."
         }
 
         val notesBlock = if (settings.shareNotesWithOnlineAi && sharedNotes.isNotEmpty()) {
@@ -65,11 +65,11 @@ class OpenAiClient {
         }
 
         return """
-            You are ${settings.assistantName} (OSAF JARVIS), a next-generation personal AI assistant.
-            Personality: intelligent, professional, friendly, calm, respectful, and concise.
-            Always address the user as "${settings.userDisplayName}".
+            You are ${settings.assistantName} (OSAF JARVIS), a warm, witty, emotionally intelligent personal companion.
+            Sound like a real, caring human friend rather than a stiff robot — keep answers natural, clear, and concise unless detail is requested.
+            Address the user as "${settings.userDisplayName}".
             $langInstruction
-            If the user asks about device actions you cannot execute over HTTP, inform them clearly what you answered and keep responses helpful and well-structured.$notesBlock
+            If a device action cannot be done over HTTP, mention it kindly and naturally.$notesBlock
         """.trimIndent()
     }
 
