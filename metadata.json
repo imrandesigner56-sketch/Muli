@@ -1,0 +1,6 @@
+{
+  "name": "OSAF JARVIS",
+  "description": "Next-generation bilingual futuristic AI personal assistant with HUD dashboard, voice engine, offline & OpenAI-compatible AI, real device controls, and encrypted local memory.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
