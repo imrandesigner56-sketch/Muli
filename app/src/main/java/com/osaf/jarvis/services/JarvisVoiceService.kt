@@ -137,7 +137,7 @@ class JarvisVoiceService : Service() {
                         },
                         onFinished = {
                             serviceScope.launch {
-                                delay(400L)
+                                coordinator.awaitAssistantIdle()
                                 val stillEnabled = settingsRepo.settingsFlow.first().wakeWordEnabled
                                 if (stillEnabled) {
                                     armWakeMonitor(app)

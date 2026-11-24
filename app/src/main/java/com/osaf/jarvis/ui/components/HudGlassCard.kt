@@ -21,39 +21,46 @@ import com.osaf.jarvis.ui.theme.LocalJarvisHudColors
 fun HudGlassCard(
     modifier: Modifier = Modifier,
     borderColor: Color? = null,
-    contentPadding: Dp = 14.dp,
+    contentPadding: Dp = 16.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val hud = LocalJarvisHudColors.current
     val strokeColor = borderColor ?: hud.borderCyan
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(if (hud.isSimpleTheme) 18.dp else 16.dp)
 
     val innerContent: @Composable () -> Unit = {
-        Box(
-            modifier = Modifier
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            hud.glassSurface,
-                            hud.deepNavy.copy(alpha = 0.88f)
+        if (hud.isSimpleTheme) {
+            Box(
+                modifier = Modifier
+                    .background(hud.glassSurface)
+                    .padding(contentPadding),
+                content = content
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                hud.glassSurface,
+                                hud.deepNavy.copy(alpha = 0.88f)
+                            )
                         )
                     )
-                )
-                .drawBehind {
-                    val corner = 12.dp.toPx()
-                    val stroke = 2.dp.toPx()
-                    val accent = hud.primaryGlow.copy(alpha = 0.7f)
-                    // Top-left HUD bracket
-                    drawLine(accent, Offset(0f, corner), Offset(0f, 0f), stroke)
-                    drawLine(accent, Offset(0f, 0f), Offset(corner, 0f), stroke)
-                    // Bottom-right HUD bracket
-                    drawLine(accent, Offset(size.width - corner, size.height), Offset(size.width, size.height), stroke)
-                    drawLine(accent, Offset(size.width, size.height - corner), Offset(size.width, size.height), stroke)
-                }
-                .padding(contentPadding),
-            content = content
-        )
+                    .drawBehind {
+                        val corner = 12.dp.toPx()
+                        val stroke = 2.dp.toPx()
+                        val accent = hud.primaryGlow.copy(alpha = 0.7f)
+                        drawLine(accent, Offset(0f, corner), Offset(0f, 0f), stroke)
+                        drawLine(accent, Offset(0f, 0f), Offset(corner, 0f), stroke)
+                        drawLine(accent, Offset(size.width - corner, size.height), Offset(size.width, size.height), stroke)
+                        drawLine(accent, Offset(size.width, size.height - corner), Offset(size.width, size.height), stroke)
+                    }
+                    .padding(contentPadding),
+                content = content
+            )
+        }
     }
 
     if (onClick != null) {
@@ -61,7 +68,8 @@ fun HudGlassCard(
             onClick = onClick,
             modifier = modifier,
             shape = shape,
-            color = Color.Transparent,
+            color = if (hud.isSimpleTheme) hud.glassSurface else Color.Transparent,
+            tonalElevation = if (hud.isSimpleTheme && hud.isLight) 1.dp else 0.dp,
             border = BorderStroke(1.dp, strokeColor),
             content = innerContent
         )
@@ -69,7 +77,8 @@ fun HudGlassCard(
         Surface(
             modifier = modifier,
             shape = shape,
-            color = Color.Transparent,
+            color = if (hud.isSimpleTheme) hud.glassSurface else Color.Transparent,
+            tonalElevation = if (hud.isSimpleTheme && hud.isLight) 1.dp else 0.dp,
             border = BorderStroke(1.dp, strokeColor),
             content = innerContent
         )

@@ -18,6 +18,7 @@ import com.osaf.jarvis.wakeword.WakeWordEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,12 +29,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class ReactorState(val label: String) {
-    IDLE("READY"),
-    LISTENING("LISTENING"),
-    THINKING("THINKING"),
-    SPEAKING("SPEAKING"),
-    OFFLINE("OFFLINE"),
-    ERROR("ISSUE")
+    IDLE("Ready"),
+    LISTENING("Listening"),
+    THINKING("Thinking"),
+    SPEAKING("Speaking"),
+    OFFLINE("Offline"),
+    ERROR("Issue")
 }
 
 class JarvisCoordinator(
@@ -128,6 +129,7 @@ class JarvisCoordinator(
                 },
                 onError = { errMsg ->
                     _errorBanner.value = errMsg
+                    _lastResponse.value = errMsg
                 }
             )
         }
@@ -145,6 +147,18 @@ class JarvisCoordinator(
         _errorBanner.value = null
     }
 
+    /**
+     * Suspends until JARVIS finishes listening, thinking, and speaking so
+     * background wake-word monitoring never interrupts or hears its own reply.
+     */
+    suspend fun awaitAssistantIdle() {
+        delay(250L)
+        while (voiceEngine.isListening.value || _isThinking.value || voiceEngine.isSpeaking.value) {
+            delay(250L)
+        }
+        delay(600L)
+    }
+
     fun triggerWakePhraseVerification(
         assistantName: String,
         onWakeConfirmed: () -> Unit,
@@ -158,6 +172,7 @@ class JarvisCoordinator(
                 preferOffline = !online,
                 onResult = { transcript ->
                     if (wakeWordEngine.matchesWakePhrase(transcript, assistantName)) {
+                        _errorBanner.value = null
                         _isBottomPopupVisible.value = true
                         onWakeConfirmed()
                         val remainder = commandInterpreter.stripWakePhrase(transcript, assistantName)
@@ -165,7 +180,6 @@ class JarvisCoordinator(
                             submitUserInput(transcript, fromVoice = true)
                             onFinished()
                         } else {
-                            // Warm wake response & listen immediately for follow-up command inside bottom sheet
                             val greet = if (settings.preferredLanguage == LanguageMode.ROMAN_URDU) {
                                 "Haan ji ${settings.userDisplayName}, main sun raha hoon! Batayein?"
                             } else {
@@ -173,26 +187,38 @@ class JarvisCoordinator(
                             }
                             _lastTranscript.value = transcript
                             _lastResponse.value = greet
-                            if (settings.ttsAutoSpeak) {
-                                voiceEngine.speak(
-                                    greet,
-                                    LanguageMode.ENGLISH,
-                                    settings.speechSpeed,
-                                    settings.speechPitch,
-                                    settings.selectedVoiceName
-                                )
-                            }
-                            voiceEngine.startListening(
-                                languageMode = settings.preferredLanguage,
-                                preferOffline = !online,
-                                onResult = { followUp ->
-                                    submitUserInput(followUp, fromVoice = true)
-                                    onFinished()
-                                },
-                                onError = {
-                                    onFinished()
+
+                            val startFollowUpListen = {
+                                scope.launch {
+                                    delay(160L)
+                                    voiceEngine.startListening(
+                                        languageMode = settings.preferredLanguage,
+                                        preferOffline = !online,
+                                        onResult = { followUp ->
+                                            submitUserInput(followUp, fromVoice = true)
+                                            onFinished()
+                                        },
+                                        onError = { errMsg ->
+                                            _errorBanner.value = errMsg
+                                            onFinished()
+                                        }
+                                    )
                                 }
-                            )
+                                Unit
+                            }
+
+                            if (settings.ttsAutoSpeak) {
+                                voiceEngine.speakAndThen(
+                                    text = greet,
+                                    languageMode = LanguageMode.ENGLISH,
+                                    speechRate = settings.speechSpeed,
+                                    speechPitch = settings.speechPitch,
+                                    selectedVoiceName = settings.selectedVoiceName,
+                                    onDone = startFollowUpListen
+                                )
+                            } else {
+                                startFollowUpListen()
+                            }
                         }
                     } else {
                         onFinished()
@@ -242,7 +268,7 @@ class JarvisCoordinator(
         if (trimmed.isEmpty()) return
 
         val now = System.currentTimeMillis()
-        if (trimmed.equals(lastProcessedText, ignoreCase = true) && (now - lastProcessedAt) < 1500L) {
+        if (trimmed.equals(lastProcessedText, ignoreCase = true) && (now - lastProcessedAt) < 1200L) {
             return
         }
         lastProcessedText = trimmed
@@ -334,6 +360,7 @@ class JarvisCoordinator(
                                     if (settings.saveChatHistory) {
                                         chatRepository.addMessage("assistant", safeMsg, outcome.language.code, "error")
                                     }
+                                    speakIfEnabled(safeMsg, outcome.language, settings)
                                 }
                             }
                         }
@@ -341,7 +368,9 @@ class JarvisCoordinator(
                 }
             } catch (e: Exception) {
                 _isThinking.value = false
-                _errorBanner.value = e.localizedMessage ?: "Command processing error."
+                val msg = e.localizedMessage ?: "Command processing error."
+                _errorBanner.value = msg
+                _lastResponse.value = msg
             }
         }
     }

@@ -110,12 +110,12 @@ fun ControlsScreen(viewModel: ControlsViewModel = viewModel()) {
             ) {
                 Column {
                     Text(
-                        text = "DEVICE CONTROL MATRIX",
+                        text = "Device Controls",
                         style = MaterialTheme.typography.headlineSmall,
-                        color = hud.primaryGlow
+                        color = hud.textPrimary
                     )
                     Text(
-                        text = "Real Android System & Hardware Controls",
+                        text = "Quick Hardware, Apps & Diagnostics",
                         style = MaterialTheme.typography.labelMedium,
                         color = hud.textSecondary
                     )
@@ -432,7 +432,7 @@ fun ControlsScreen(viewModel: ControlsViewModel = viewModel()) {
                         showAlarmDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = hud.primaryGlow)
-                ) { Text("Set Alarm", color = Color.Black) }
+                ) { Text("Set Alarm", color = hud.onPrimaryAccent) }
             },
             dismissButton = {
                 TextButton(onClick = { showAlarmDialog = false }) { Text("Cancel") }

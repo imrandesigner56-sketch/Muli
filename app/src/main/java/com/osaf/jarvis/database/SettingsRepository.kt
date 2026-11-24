@@ -18,9 +18,9 @@ import kotlinx.coroutines.flow.map
 private val Context.jarvisDataStore: DataStore<Preferences> by preferencesDataStore(name = "osaf_jarvis_prefs")
 
 enum class HudThemeMode(val displayName: String) {
-    CYBER_CYAN("Cyber Cyan"),
-    ARC_BLUE("Arc Reactor Blue"),
-    STEALTH_DARK("Stealth Monochrome")
+    SIMPLE_DARK("Simple Dark"),
+    SIMPLE_LIGHT("Simple Light"),
+    CYBER_CYAN("Classic HUD")
 }
 
 data class JarvisSettings(
@@ -45,7 +45,7 @@ data class JarvisSettings(
     val notificationsEnabled: Boolean = true,
     val shareNotesWithOnlineAi: Boolean = false,
     val saveChatHistory: Boolean = true,
-    val themeMode: HudThemeMode = HudThemeMode.CYBER_CYAN
+    val themeMode: HudThemeMode = HudThemeMode.SIMPLE_DARK
 )
 
 class SettingsRepository(
@@ -104,7 +104,7 @@ class SettingsRepository(
             shareNotesWithOnlineAi = prefs[Keys.SHARE_NOTES_ONLINE] ?: false,
             saveChatHistory = prefs[Keys.SAVE_CHAT_HISTORY] ?: true,
             themeMode = HudThemeMode.entries.find { it.name == prefs[Keys.THEME_MODE] }
-                ?: HudThemeMode.CYBER_CYAN
+                ?: HudThemeMode.SIMPLE_DARK
         )
     }
 

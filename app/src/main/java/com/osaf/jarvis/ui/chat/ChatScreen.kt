@@ -123,12 +123,12 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
         ) {
             Column {
                 Text(
-                    text = "AI NEURAL LINK",
+                    text = "AI Chat",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = hud.primaryGlow
+                    color = hud.textPrimary
                 )
                 Text(
-                    text = if (isOnline) "Online AI & Local Commands" else "Offline Command Mode",
+                    text = if (isOnline) "Online AI & Device Commands" else "Offline Mode",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isOnline) hud.onlineGreen else hud.textSecondary
                 )
@@ -280,7 +280,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     .testTag("chat_send_button"),
                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = hud.primaryGlow)
             ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.Black)
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = hud.onPrimaryAccent)
             }
         }
     }

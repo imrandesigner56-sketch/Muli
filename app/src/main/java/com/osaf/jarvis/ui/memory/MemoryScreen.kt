@@ -90,7 +90,7 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
                 FloatingActionButton(
                     onClick = { if (selectedTab == 0) showAddNote = true else showAddReminder = true },
                     containerColor = hud.primaryGlow,
-                    contentColor = Color.Black,
+                    contentColor = hud.onPrimaryAccent,
                     modifier = Modifier.testTag("memory_add_fab")
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Add memory item")
@@ -106,12 +106,12 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
         ) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "JARVIS MEMORY CORE",
+                text = "Notes & Memory",
                 style = MaterialTheme.typography.headlineSmall,
-                color = hud.primaryGlow
+                color = hud.textPrimary
             )
             Text(
-                text = "Transparent Local Storage & User-Controlled Backups",
+                text = "Saved Notes, Reminders & Backups",
                 style = MaterialTheme.typography.labelMedium,
                 color = hud.textSecondary
             )
@@ -262,9 +262,9 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
                                             colors = ButtonDefaults.buttonColors(containerColor = hud.primaryGlow),
                                             modifier = Modifier.weight(1f)
                                         ) {
-                                            Icon(Icons.Default.Upload, contentDescription = null, tint = Color.Black)
+                                            Icon(Icons.Default.Upload, contentDescription = null, tint = hud.onPrimaryAccent)
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Export", color = Color.Black)
+                                            Text("Export", color = hud.onPrimaryAccent)
                                         }
                                         OutlinedButton(
                                             onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) },

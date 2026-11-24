@@ -1,5 +1,9 @@
 package com.osaf.jarvis.ui
 
+import android.graphics.Color as AndroidColor
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,6 +36,7 @@ import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -74,7 +79,8 @@ enum class JarvisNavItem(
 
 @Composable
 fun JarvisAppShell() {
-    val app = LocalContext.current.applicationContext as JarvisApplication
+    val context = LocalContext.current
+    val app = context.applicationContext as JarvisApplication
     val coordinator = app.container.coordinator
     val voiceEngine = app.container.voiceEngine
 
@@ -94,6 +100,20 @@ fun JarvisAppShell() {
 
     JarvisTheme(themeMode = settings.themeMode) {
         val hud = LocalJarvisHudColors.current
+        LaunchedEffect(hud.isLight) {
+            (context as? ComponentActivity)?.enableEdgeToEdge(
+                statusBarStyle = if (hud.isLight) {
+                    SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+                } else {
+                    SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+                },
+                navigationBarStyle = if (hud.isLight) {
+                    SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+                } else {
+                    SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+                }
+            )
+        }
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination

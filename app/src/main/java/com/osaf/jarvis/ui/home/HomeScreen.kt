@@ -91,6 +91,7 @@ fun HomeScreen(
     val isOnline by viewModel.isOnlineActive.collectAsStateWithLifecycle()
     val rmsLevel by viewModel.rmsLevel.collectAsStateWithLifecycle()
     val lastResponse by viewModel.lastResponse.collectAsStateWithLifecycle()
+    val errorBanner by viewModel.errorBanner.collectAsStateWithLifecycle()
     val isListening by viewModel.isListening.collectAsStateWithLifecycle()
     val battery by viewModel.batteryStatus.collectAsStateWithLifecycle()
 
@@ -170,10 +171,16 @@ fun HomeScreen(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(hud.spaceBlack, Color(0xFF061528), hud.spaceBlack)
-                )
+            .then(
+                if (hud.isSimpleTheme) {
+                    Modifier.background(hud.spaceBlack)
+                } else {
+                    Modifier.background(
+                        Brush.verticalGradient(
+                            colors = listOf(hud.spaceBlack, Color(0xFF061528), hud.spaceBlack)
+                        )
+                    )
+                }
             )
             .imePadding()
     ) {
@@ -273,9 +280,9 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(18.dp))
 
                 Text(
-                    text = lastResponse,
+                    text = errorBanner ?: lastResponse,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = hud.textPrimary,
+                    color = if (errorBanner != null) hud.warningAmber else hud.textPrimary,
                     textAlign = TextAlign.Center,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
@@ -398,7 +405,7 @@ fun HomeScreen(
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.Send,
                                         contentDescription = "Send",
-                                        tint = Color.Black,
+                                        tint = hud.onPrimaryAccent,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }

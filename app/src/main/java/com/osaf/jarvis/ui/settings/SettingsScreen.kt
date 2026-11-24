@@ -125,12 +125,12 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
         item {
             Column(modifier = Modifier.padding(top = 12.dp)) {
                 Text(
-                    text = "SYSTEM CONFIGURATION",
+                    text = "Settings",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = hud.primaryGlow
+                    color = hud.textPrimary
                 )
                 Text(
-                    text = "AI Brain, Voice Engine, Personalization & Privacy",
+                    text = "Voice, Theme, AI Brain & Privacy",
                     style = MaterialTheme.typography.labelMedium,
                     color = hud.textSecondary
                 )
@@ -245,7 +245,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                                 .weight(1f)
                                 .testTag("save_api_button")
                         ) {
-                            Text("Save Config", color = Color.Black)
+                            Text("Save Config", color = hud.onPrimaryAccent)
                         }
                         OutlinedButton(
                             onClick = { viewModel.testApiConnection(endpoint, apiKeyInput, modelName, timeoutSec) },
@@ -460,7 +460,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         }
                     }
 
-                    Text("HUD Theme Accent", style = MaterialTheme.typography.labelMedium, color = hud.textSecondary)
+                    Text("App Theme", style = MaterialTheme.typography.labelMedium, color = hud.textSecondary)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         HudThemeMode.entries.forEach { mode ->
                             FilterChip(
@@ -479,7 +479,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = hud.primaryGlow)
                     ) {
-                        Text("Apply Identity", color = Color.Black)
+                        Text("Apply Identity", color = hud.onPrimaryAccent)
                     }
                 }
             }

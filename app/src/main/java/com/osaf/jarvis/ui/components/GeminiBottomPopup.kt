@@ -101,15 +101,19 @@ fun GeminiBottomPopup(
     ) {
         Surface(
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            color = Color(0xF5071222),
+            color = hud.deepNavy,
             border = BorderStroke(
-                width = 1.5.dp,
+                width = if (hud.isSimpleTheme) 1.dp else 1.5.dp,
                 brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        hud.secondaryGlow.copy(alpha = glowAlpha),
-                        hud.primaryGlow.copy(alpha = glowAlpha),
-                        hud.onlineGreen.copy(alpha = glowAlpha * 0.85f)
-                    )
+                    colors = if (isListening || isSpeaking || reactorState == ReactorState.THINKING) {
+                        listOf(
+                            hud.secondaryGlow.copy(alpha = glowAlpha),
+                            hud.primaryGlow.copy(alpha = glowAlpha),
+                            hud.onlineGreen.copy(alpha = glowAlpha * 0.85f)
+                        )
+                    } else {
+                        listOf(hud.borderCyan, hud.borderCyan)
+                    }
                 )
             ),
             shadowElevation = 24.dp,
@@ -135,7 +139,7 @@ fun GeminiBottomPopup(
                         .width(42.dp)
                         .height(4.dp)
                         .clip(CircleShape)
-                        .background(hud.primaryGlow.copy(alpha = 0.65f))
+                        .background(hud.primaryGlow.copy(alpha = 0.55f))
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -154,7 +158,7 @@ fun GeminiBottomPopup(
                                 .clip(CircleShape)
                                 .background(
                                     Brush.radialGradient(
-                                        listOf(hud.primaryGlow, hud.secondaryGlow.copy(alpha = 0.25f))
+                                        listOf(hud.primaryGlow, hud.secondaryGlow.copy(alpha = 0.35f))
                                     )
                                 ),
                             contentAlignment = Alignment.Center
@@ -162,7 +166,7 @@ fun GeminiBottomPopup(
                             Icon(
                                 imageVector = Icons.Default.GraphicEq,
                                 contentDescription = assistantName,
-                                tint = Color.White,
+                                tint = hud.onPrimaryAccent,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -254,7 +258,7 @@ fun GeminiBottomPopup(
                             onClick = onConfirmAction,
                             colors = ButtonDefaults.buttonColors(containerColor = hud.primaryGlow)
                         ) {
-                            Text("Confirm", color = Color.Black)
+                            Text("Confirm", color = hud.onPrimaryAccent)
                         }
                         OutlinedButton(onClick = onCancelAction) {
                             Text("Cancel", color = hud.textPrimary)
