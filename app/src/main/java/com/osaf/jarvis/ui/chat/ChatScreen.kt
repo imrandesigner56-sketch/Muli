@@ -3,6 +3,7 @@ package com.osaf.jarvis.ui.chat
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -29,10 +30,14 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -40,6 +45,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -55,7 +61,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
@@ -79,7 +84,11 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
     val streaming by viewModel.streamingResponse.collectAsStateWithLifecycle()
     val reactorState by viewModel.reactorState.collectAsStateWithLifecycle()
     val isListening by viewModel.isListening.collectAsStateWithLifecycle()
+    val isSpeaking by viewModel.isSpeaking.collectAsStateWithLifecycle()
+    val activeVoiceSource by viewModel.activeVoiceSource.collectAsStateWithLifecycle()
     val isOnline by viewModel.isOnlineActive.collectAsStateWithLifecycle()
+    val pendingAttachment by viewModel.pendingAttachment.collectAsStateWithLifecycle()
+    val attachmentStatus by viewModel.attachmentStatus.collectAsStateWithLifecycle()
 
     var input by rememberSaveable { mutableStateOf("") }
     var showClearDialog by remember { mutableStateOf(false) }
@@ -91,7 +100,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
             "250 multiply by 40",
             "Flashlight on karo",
             "Aaj ki date batao",
-            "What can you do?"
+            "What do you remember about me?"
         )
     }
 
@@ -99,6 +108,19 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) viewModel.toggleVoiceInput()
+    }
+
+    // Zero-permission Android Photo Picker
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let { viewModel.prepareImage(it) }
+    }
+
+    val documentPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.prepareDocument(it) }
     }
 
     LaunchedEffect(messages.size, streaming) {
@@ -128,21 +150,39 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     color = hud.textPrimary
                 )
                 Text(
-                    text = if (isOnline) "Online AI & Device Commands" else "Offline Mode",
+                    text = when {
+                        isSpeaking -> "Speaking • $activeVoiceSource"
+                        isOnline -> "Online AI, Vision & Web Knowledge"
+                        else -> "Offline Device Assistant"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isOnline) hud.onlineGreen else hud.textSecondary
                 )
             }
-            if (messages.isNotEmpty()) {
-                IconButton(
-                    onClick = { showClearDialog = true },
-                    modifier = Modifier.testTag("clear_chat_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = "Clear conversation history",
-                        tint = hud.textSecondary
-                    )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isSpeaking) {
+                    IconButton(
+                        onClick = { viewModel.stopSpeaking() },
+                        modifier = Modifier.testTag("chat_stop_speaking")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VolumeOff,
+                            contentDescription = "Stop speaking",
+                            tint = hud.warningAmber
+                        )
+                    }
+                }
+                if (messages.isNotEmpty()) {
+                    IconButton(
+                        onClick = { showClearDialog = true },
+                        modifier = Modifier.testTag("clear_chat_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = "Clear conversation history",
+                            tint = hud.textSecondary
+                        )
+                    }
                 }
             }
         }
@@ -183,13 +223,13 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Hello Sir, I am OSAF JARVIS.",
+                        text = "Assalam o alaikum, I'm OSAF JARVIS.",
                         style = MaterialTheme.typography.titleMedium,
                         color = hud.textPrimary
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Ask in English, Urdu, or Roman Urdu. Device commands work offline; configure an HTTPS API key in Settings for cloud AI.",
+                        text = "Speak or type in Urdu, Roman Urdu, or English. Attach a photo or document for AI analysis, or run offline device commands anytime.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = hud.textSecondary
                     )
@@ -207,7 +247,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     if (streaming.isNotBlank() || reactorState == ReactorState.THINKING) {
                         item(key = "streaming_bubble") {
                             StreamingBubble(
-                                text = if (streaming.isNotBlank()) "$streaming ▌" else "Processing telemetry...",
+                                text = if (streaming.isNotBlank()) "$streaming ▌" else "Thinking...",
                                 isStreaming = streaming.isNotBlank()
                             )
                         }
@@ -216,29 +256,85 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
             }
         }
 
-        // Bottom input bar
+        // Attachment chip / feedback banner above input bar
+        if (pendingAttachment != null || attachmentStatus != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(hud.deepNavy.copy(alpha = 0.7f))
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                pendingAttachment?.let { att ->
+                    InputChip(
+                        selected = true,
+                        onClick = { viewModel.clearPendingAttachment() },
+                        label = {
+                            Text(
+                                text = "${if (att.isImage) "Photo" else "Doc"}: ${att.displayName}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        },
+                        trailingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remove attachment",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+                }
+                attachmentStatus?.let { status ->
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = hud.warningAmber,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { viewModel.dismissAttachmentStatus() }) {
+                        Text("OK", color = hud.primaryGlow)
+                    }
+                }
+            }
+        }
+
+        // Bottom input bar with Photo Picker, Document Picker, Mic, and Send
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(hud.deepNavy)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             IconButton(
                 onClick = {
-                    val granted = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (granted) viewModel.toggleVoiceInput() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    photoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
                 },
-                modifier = Modifier.testTag("chat_mic_button")
+                modifier = Modifier.testTag("chat_attach_photo")
             ) {
                 Icon(
-                    imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                    contentDescription = if (isListening) "Stop listening" else "Voice input",
-                    tint = if (isListening) hud.errorCrimson else hud.primaryGlow
+                    imageVector = Icons.Default.Image,
+                    contentDescription = "Attach photo",
+                    tint = hud.primaryGlow
+                )
+            }
+
+            IconButton(
+                onClick = {
+                    documentPickerLauncher.launch(
+                        arrayOf("text/plain", "text/*", "application/pdf", "application/json")
+                    )
+                },
+                modifier = Modifier.testTag("chat_attach_doc")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AttachFile,
+                    contentDescription = "Attach document",
+                    tint = hud.textSecondary
                 )
             }
 
@@ -250,7 +346,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(
                     onSend = {
-                        if (input.isNotBlank()) {
+                        if (input.isNotBlank() || pendingAttachment != null) {
                             viewModel.sendMessage(input)
                             input = ""
                         }
@@ -268,9 +364,26 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     .testTag("chat_message_input")
             )
 
+            IconButton(
+                onClick = {
+                    val granted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (granted) viewModel.toggleVoiceInput() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                },
+                modifier = Modifier.testTag("chat_mic_button")
+            ) {
+                Icon(
+                    imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                    contentDescription = if (isListening) "Stop listening" else "Voice input",
+                    tint = if (isListening) hud.errorCrimson else hud.primaryGlow
+                )
+            }
+
             FilledIconButton(
                 onClick = {
-                    if (input.isNotBlank()) {
+                    if (input.isNotBlank() || pendingAttachment != null) {
                         viewModel.sendMessage(input)
                         input = ""
                     }

@@ -1,30 +1,34 @@
-# OSAF JARVIS — Next-Generation Personal AI Assistant
+# OSAF JARVIS 2.0 — Next-Generation Personal AI Assistant
 
-**OSAF JARVIS** is a native Kotlin + Jetpack Compose Android AI assistant featuring an Iron-Man-inspired futuristic HUD, bilingual/multilingual support (**English**, **Urdu**, and **Roman Urdu**), an offline command & math/memory core, an OpenAI-compatible HTTPS Online AI engine with streaming, real Android device controls, and Android Keystore-backed API key encryption.
+**OSAF JARVIS 2.0** is a native Kotlin + Jetpack Compose personal AI assistant built for Android 8.0+ (API 26–36) with pure-JVM/Kotlin lightweight architecture tailored for 2GB–3GB RAM devices.
 
-## Architecture Overview
+## Key Upgrades in 2.0
 
-- `com.example.MainActivity`: Edge-to-edge host activity.
-- `com.osaf.jarvis.JarvisApplication` / `AppContainer`: Lightweight manual dependency container (optimized for 2GB–3GB RAM).
-- `com.osaf.jarvis.JarvisCoordinator`: Central state machine (`ReactorState`: `IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, `OFFLINE`, `ERROR`), duplicate command guard, and command/AI routing.
-- `com.osaf.jarvis.ui.*`:
-  - `home`: Responsive HUD dashboard with animated 60-FPS `ArcReactorView`, live battery/date/time, push-to-talk mic, wake-word toggle, confirmation cards, and quick command input.
-  - `chat`: Lazy-loaded conversation history with SSE streaming display and bilingual quick prompts.
-  - `controls`: Real flashlight toggle (`CameraManager`), media volume slider (`AudioManager`), system shortcuts, CPU ABI & RAM diagnostics, confirmation-gated Call/SMS dialer, and installed app launcher.
-  - `memory`: Room-backed Notes search/CRUD, scheduled local Reminders, and JSON Backup Export/Import (SAF).
-  - `settings`: HTTPS OpenAI-compatible AI config, Android Keystore AES-256-GCM key storage, connection tester, TTS voice/pitch/speed calibration, wake-word foreground service controls, and privacy toggles.
-- `com.osaf.jarvis.voice` & `com.osaf.jarvis.wakeword` & `com.osaf.jarvis.services`:
-  - `VoiceEngine`: `SpeechRecognizer` with live audio RMS feedback + `TextToSpeech` (English & Urdu locales).
-  - `WakeWordEngine` & `JarvisVoiceService`: Opt-in `AudioRecord` acoustic energy gate + microphone `ForegroundService` with persistent Stop notification.
-- `com.osaf.jarvis.commands` & `com.osaf.jarvis.ai`:
-  - `CommandInterpreter`: Natural-language intent parser for English, Urdu, and Roman Urdu.
-  - `OfflineAiEngine` & `OpenAiClient`: Honest offline capabilities and HTTPS + SSE streaming OpenAI Chat Completions client.
+1. **Human-Like Neural Voice Engine (`NeuralTtsClient` + `VoiceEngine`)**:
+   - **Online Neural TTS**: Supports OpenAI Neural Voice (`gpt-4o-mini-tts` / `tts-1`, default voice `onyx`) and ElevenLabs streaming (`eleven_multilingual_v2`) plus custom OpenAI-compatible HTTPS TTS endpoints.
+   - **Sentence-by-Sentence Streaming Playback (`SpeechSentenceChunker`)**: Speaks the very first sentence as SSE tokens arrive for minimal latency.
+   - **Best Offline Fallback**: Automatically ranks installed local/network `ur-PK` and `en` device TTS voices when offline — without misrepresenting basic Android TTS as neural human speech.
+2. **Real-Time Conversation & Barge-In**:
+   - Supports continuous follow-up turn listening and instant **barge-in interruption** via hardware `AcousticEchoCanceler` voice detection or tapping the orb/mic button mid-reply.
+3. **Emotion-Aware Personality & Long-Term Memory (`PersonalityEngine` + Room DB v2)**:
+   - Detects user mood (`HAPPY`, `SAD`, `FRUSTRATED`, `CONFUSED`, `TIRED`, `NEUTRAL`) across **English**, **Urdu**, and **Roman Urdu**.
+   - Remembers user preferences, active projects, personal facts, and standing rules (`MemoryFactEntity`), tracks frequent commands (`CommandStatEntity`), and offers a warm 24-hour inactivity check-in in the app UI (zero spam notifications).
+4. **Live Web Knowledge, Vision & Documents**:
+   - `WebSearchTool` fetches live HTTPS answers from DuckDuckGo Instant Answer and Wikipedia REST APIs.
+   - `AttachmentHelper` + Android Photo Picker (`PickVisualMedia`) enable multimodal image inspection and local text/PDF document analysis.
+5. **Simple Premium Dark UI & Official Branding**:
+   - Deep black `#05080F` surface with subtle electric blue lighting, animated central orb, 1 prominent mic button, minimal conversation snippet, launch splash, adaptive icon, and About section featuring the official OSAF JARVIS logo.
 
-## Compatibility & Build Requirements
+## API Configuration Guide
 
-- **Minimum SDK**: Android 8.0 (API 26)
-- **Target / Compile SDK**: API 36
-- **CPU Architectures**: Universal pure-Kotlin/Java APK supporting `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64` (no Play Services required for offline features).
+1. Open **Settings** (gear icon on the Home screen).
+2. Under **Online AI Brain (OpenAI-Compatible)**:
+   - Set **HTTPS Chat Completions Endpoint** (default `https://api.openai.com/v1/chat/completions`).
+   - Enter your **API Key** (encrypted locally with Android Keystore AES-GCM).
+   - Set **Model Name** (e.g. `gpt-4o-mini`, `gpt-4o`), then tap **Save Config** and **Test Link**.
+3. Under **Human Voice & Neural TTS**:
+   - Choose **OpenAI Neural Voice** (reuses your main OpenAI key automatically or accepts a dedicated TTS key) or **ElevenLabs Human Voice** (with your `xi-api-key`).
+   - Select **Best Device Offline TTS** for zero-network usage.
 
 ## Building & Installing
 
@@ -33,13 +37,12 @@
    gradle :app:assembleDebug
    ```
    Output APK: `app/build/outputs/apk/debug/app-debug.apk`
-2. Build the release APK (requires release signing env vars `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD`):
+2. Build a signed release APK (set `KEYSTORE_PATH`, `STORE_PASSWORD`, and `KEY_PASSWORD` environment variables first):
    ```bash
    gradle :app:assembleRelease
    ```
-3. Run unit & Robolectric UI tests:
+3. Run pure-JVM unit tests:
    ```bash
-   gradle :app:testDebugUnitTest
+   gradle :app:testDebugUnitTest --tests "com.osaf.jarvis.JarvisCoreTests" --tests "com.example.ExampleUnitTest"
    ```
-4. Install on an Android 8.0+ device:
-   Transfer `app-debug.apk` to the device or run `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+4. Transfer `app-debug.apk` to an Android 8.0+ phone and tap to install.

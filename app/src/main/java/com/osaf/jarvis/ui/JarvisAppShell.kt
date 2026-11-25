@@ -19,11 +19,9 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +36,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -57,6 +58,7 @@ import com.osaf.jarvis.JarvisApplication
 import com.osaf.jarvis.database.JarvisSettings
 import com.osaf.jarvis.ui.chat.ChatScreen
 import com.osaf.jarvis.ui.components.GeminiBottomPopup
+import com.osaf.jarvis.ui.components.JarvisSplashOverlay
 import com.osaf.jarvis.ui.controls.ControlsScreen
 import com.osaf.jarvis.ui.home.HomeScreen
 import com.osaf.jarvis.ui.memory.MemoryScreen
@@ -72,10 +74,11 @@ enum class JarvisNavItem(
 ) {
     HOME("home", "Home", Icons.Filled.Home, Icons.Outlined.Home),
     CHAT("chat", "AI Chat", Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat),
-    CONTROLS("controls", "Controls", Icons.Filled.Tune, Icons.Outlined.Tune),
     MEMORY("memory", "Memory", Icons.Filled.Memory, Icons.Outlined.Memory),
-    SETTINGS("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
+    CONTROLS("controls", "Controls", Icons.Filled.Tune, Icons.Outlined.Tune)
 }
+
+const val ROUTE_SETTINGS = "settings"
 
 @Composable
 fun JarvisAppShell() {
@@ -98,6 +101,8 @@ fun JarvisAppShell() {
     val isListening by voiceEngine.isListening.collectAsStateWithLifecycle()
     val isSpeaking by voiceEngine.isSpeaking.collectAsStateWithLifecycle()
 
+    var showSplash by rememberSaveable { mutableStateOf(true) }
+
     JarvisTheme(themeMode = settings.themeMode) {
         val hud = LocalJarvisHudColors.current
         LaunchedEffect(hud.isLight) {
@@ -117,6 +122,7 @@ fun JarvisAppShell() {
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination
+        val isOnSettings = currentDestination?.route == ROUTE_SETTINGS
 
         fun navigateTo(route: String) {
             navController.navigate(route) {
@@ -136,7 +142,7 @@ fun JarvisAppShell() {
                     containerColor = hud.spaceBlack,
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     bottomBar = {
-                        if (!useRail) {
+                        if (!useRail && !isOnSettings) {
                             NavigationBar(
                                 containerColor = hud.deepNavy,
                                 tonalElevation = 0.dp
@@ -178,7 +184,7 @@ fun JarvisAppShell() {
                             .statusBarsPadding()
                             .padding(innerPadding)
                     ) {
-                        if (useRail) {
+                        if (useRail && !isOnSettings) {
                             NavigationRail(containerColor = hud.deepNavy) {
                                 JarvisNavItem.entries.forEach { item ->
                                     val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
@@ -212,13 +218,19 @@ fun JarvisAppShell() {
                             composable(JarvisNavItem.HOME.route) {
                                 HomeScreen(
                                     onOpenChat = { navigateTo(JarvisNavItem.CHAT.route) },
-                                    onOpenSettings = { navigateTo(JarvisNavItem.SETTINGS.route) }
+                                    onOpenSettings = {
+                                        navController.navigate(ROUTE_SETTINGS) {
+                                            launchSingleTop = true
+                                        }
+                                    }
                                 )
                             }
                             composable(JarvisNavItem.CHAT.route) { ChatScreen() }
-                            composable(JarvisNavItem.CONTROLS.route) { ControlsScreen() }
                             composable(JarvisNavItem.MEMORY.route) { MemoryScreen() }
-                            composable(JarvisNavItem.SETTINGS.route) { SettingsScreen() }
+                            composable(JarvisNavItem.CONTROLS.route) { ControlsScreen() }
+                            composable(ROUTE_SETTINGS) {
+                                SettingsScreen(onBack = { navController.popBackStack() })
+                            }
                         }
                     }
                 }
@@ -228,7 +240,7 @@ fun JarvisAppShell() {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f))
+                            .background(Color.Black.copy(alpha = 0.48f))
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
@@ -249,15 +261,18 @@ fun JarvisAppShell() {
                     pendingConfirmation = pendingConfirmation,
                     isListening = isListening,
                     isSpeaking = isSpeaking,
-                    onMicClick = {
-                        if (isListening) coordinator.cancelVoiceCommand()
-                        else coordinator.startVoiceCommand(openBottomSheet = true)
-                    },
+                    onMicClick = { coordinator.onOrbOrMicTapped() },
                     onStopSpeaking = { coordinator.stopSpeaking() },
                     onConfirmAction = { coordinator.confirmPendingAction() },
                     onCancelAction = { coordinator.cancelPendingAction() },
                     onDismiss = { coordinator.dismissBottomPopup() },
                     modifier = Modifier.align(Alignment.BottomCenter)
+                )
+
+                // Crisp Launch Splash using official OSAF JARVIS emblem
+                JarvisSplashOverlay(
+                    visible = showSplash,
+                    onFinished = { showSplash = false }
                 )
             }
         }

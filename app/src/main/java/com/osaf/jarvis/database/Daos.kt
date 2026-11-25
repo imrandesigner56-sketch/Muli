@@ -69,3 +69,42 @@ interface ChatDao {
     @Query("DELETE FROM chat_messages")
     suspend fun clearAll()
 }
+
+@Dao
+interface MemoryFactDao {
+    @Query("SELECT * FROM memory_facts ORDER BY importance DESC, updatedAt DESC")
+    fun observeAll(): Flow<List<MemoryFactEntity>>
+
+    @Query("SELECT * FROM memory_facts ORDER BY importance DESC, updatedAt DESC")
+    suspend fun getAllSnapshot(): List<MemoryFactEntity>
+
+    @Query("SELECT * FROM memory_facts WHERE LOWER(factKey) = LOWER(:key) LIMIT 1")
+    suspend fun findByKey(key: String): MemoryFactEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(fact: MemoryFactEntity): Long
+
+    @Update
+    suspend fun update(fact: MemoryFactEntity)
+
+    @Query("DELETE FROM memory_facts WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM memory_facts")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface CommandStatDao {
+    @Query("SELECT * FROM command_stats ORDER BY usageCount DESC, lastUsedAt DESC LIMIT :limit")
+    fun observeTop(limit: Int = 6): Flow<List<CommandStatEntity>>
+
+    @Query("SELECT * FROM command_stats WHERE commandKey = :key LIMIT 1")
+    suspend fun getByKey(key: String): CommandStatEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(stat: CommandStatEntity)
+
+    @Query("DELETE FROM command_stats")
+    suspend fun deleteAll()
+}

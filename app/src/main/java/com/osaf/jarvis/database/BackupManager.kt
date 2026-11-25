@@ -7,7 +7,8 @@ import org.json.JSONObject
 
 data class BackupImportSummary(
     val notesImported: Int,
-    val remindersImported: Int
+    val remindersImported: Int,
+    val factsImported: Int
 )
 
 class BackupManager(
@@ -17,19 +18,21 @@ class BackupManager(
     suspend fun exportToJson(): String {
         val notes = memoryRepository.getNotesSnapshot()
         val reminders = memoryRepository.getRemindersSnapshot()
+        val facts = memoryRepository.getFactsSnapshot()
         val settings = settingsRepository.settingsFlow.first()
 
         val root = JSONObject()
-        root.put("format", "osaf_jarvis_backup_v1")
+        root.put("format", "osaf_jarvis_backup_v2")
         root.put("exportedAt", System.currentTimeMillis())
 
-        // Export non-secret preferences only (NEVER export API key!)
+        // Export non-secret preferences only (NEVER export API keys!)
         val prefsObj = JSONObject().apply {
             put("assistantName", settings.assistantName)
             put("userDisplayName", settings.userDisplayName)
             put("preferredLanguage", settings.preferredLanguage.code)
             put("speechSpeed", settings.speechSpeed.toDouble())
             put("speechPitch", settings.speechPitch.toDouble())
+            put("voiceVolume", settings.voiceVolume.toDouble())
             put("ttsAutoSpeak", settings.ttsAutoSpeak)
             put("themeMode", settings.themeMode.name)
         }
@@ -50,6 +53,19 @@ class BackupManager(
         }
         root.put("notes", notesArray)
 
+        val factsArray = JSONArray()
+        for (fact in facts) {
+            factsArray.put(
+                JSONObject().apply {
+                    put("category", fact.category)
+                    put("factKey", fact.factKey)
+                    put("factValue", fact.factValue)
+                    put("importance", fact.importance)
+                }
+            )
+        }
+        root.put("memoryFacts", factsArray)
+
         val remindersArray = JSONArray()
         for (rem in reminders) {
             remindersArray.put(
@@ -68,7 +84,7 @@ class BackupManager(
         return try {
             val root = JSONObject(jsonText)
             val format = root.optString("format")
-            if (format != "osaf_jarvis_backup_v1") {
+            if (format != "osaf_jarvis_backup_v1" && format != "osaf_jarvis_backup_v2") {
                 return Result.failure(IllegalArgumentException("Unsupported backup format."))
             }
 
@@ -76,10 +92,10 @@ class BackupManager(
                 val lang = LanguageMode.entries.find { it.code == p.optString("preferredLanguage") }
                     ?: LanguageMode.AUTO
                 val theme = HudThemeMode.entries.find { it.name == p.optString("themeMode") }
-                    ?: HudThemeMode.CYBER_CYAN
+                    ?: HudThemeMode.SIMPLE_DARK
                 settingsRepository.updatePersonalization(
                     assistantName = p.optString("assistantName", "JARVIS"),
-                    userDisplayName = p.optString("userDisplayName", "Sir"),
+                    userDisplayName = p.optString("userDisplayName", "Osaf"),
                     preferredLanguage = lang,
                     themeMode = theme
                 )
@@ -103,6 +119,25 @@ class BackupManager(
                 }
             }
 
+            var factsCount = 0
+            val factsArr = root.optJSONArray("memoryFacts")
+            if (factsArr != null) {
+                for (i in 0 until factsArr.length()) {
+                    val obj = factsArr.optJSONObject(i) ?: continue
+                    val k = obj.optString("factKey").trim()
+                    val v = obj.optString("factValue").trim()
+                    if (k.isNotEmpty() && v.isNotEmpty()) {
+                        memoryRepository.upsertMemoryFact(
+                            category = obj.optString("category", "Preference"),
+                            factKey = k,
+                            factValue = v,
+                            importance = obj.optInt("importance", 2)
+                        )
+                        factsCount++
+                    }
+                }
+            }
+
             var remindersCount = 0
             val remArr = root.optJSONArray("reminders")
             if (remArr != null) {
@@ -120,7 +155,7 @@ class BackupManager(
                 }
             }
 
-            Result.success(BackupImportSummary(notesCount, remindersCount))
+            Result.success(BackupImportSummary(notesCount, remindersCount, factsCount))
         } catch (e: Exception) {
             Result.failure(e)
         }

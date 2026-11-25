@@ -6,9 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.osaf.jarvis.JarvisApplication
 import com.osaf.jarvis.ReactorState
 import com.osaf.jarvis.commands.PendingConfirmation
+import com.osaf.jarvis.database.CommandStatEntity
 import com.osaf.jarvis.database.JarvisSettings
 import com.osaf.jarvis.device.BatteryStatus
 import com.osaf.jarvis.services.JarvisVoiceService
+import com.osaf.jarvis.utils.PerformanceMetrics
+import com.osaf.jarvis.utils.PreparedAttachment
+import com.osaf.jarvis.utils.RuntimePerformanceSnapshot
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +27,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val coordinator = container.coordinator
     private val deviceController = container.deviceController
     private val settingsRepo = container.settingsRepository
+    private val memoryRepo = container.memoryRepository
     private val voiceEngine = container.voiceEngine
 
     val settings: StateFlow<JarvisSettings> = settingsRepo.settingsFlow
@@ -38,9 +43,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val pendingConfirmation: StateFlow<PendingConfirmation?> = coordinator.pendingConfirmation
     val isListening: StateFlow<Boolean> = voiceEngine.isListening
     val isSpeaking: StateFlow<Boolean> = voiceEngine.isSpeaking
+    val activeVoiceSource: StateFlow<String> = voiceEngine.activeVoiceSource
+    val perfSnapshot: StateFlow<RuntimePerformanceSnapshot> = PerformanceMetrics.snapshot
 
-    private val _dateTime = MutableStateFlow(deviceController.getCurrentDateTimeFormatted())
-    val dateTime: StateFlow<Pair<String, String>> = _dateTime.asStateFlow()
+    val topCommands: StateFlow<List<CommandStatEntity>> = memoryRepo.topCommands
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _batteryStatus = MutableStateFlow(deviceController.getBatteryStatus())
     val batteryStatus: StateFlow<BatteryStatus> = _batteryStatus.asStateFlow()
@@ -48,27 +55,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             while (isActive) {
-                _dateTime.value = deviceController.getCurrentDateTimeFormatted()
                 _batteryStatus.value = deviceController.getBatteryStatus()
-                delay(15_000L)
+                PerformanceMetrics.refreshMemory()
+                delay(20_000L)
             }
         }
     }
 
-    fun onMicPressed() {
-        if (isListening.value) {
-            coordinator.cancelVoiceCommand()
-        } else {
-            coordinator.startVoiceCommand()
-        }
+    fun onOrbOrMicTapped() {
+        coordinator.onOrbOrMicTapped()
     }
 
     fun onStopSpeaking() {
         coordinator.stopSpeaking()
     }
 
-    fun submitCommand(text: String) {
-        coordinator.submitUserInput(text, fromVoice = false)
+    fun submitCommand(text: String, attachment: PreparedAttachment? = null) {
+        coordinator.submitUserInput(text, fromVoice = false, attachment = attachment)
     }
 
     fun toggleOnlineOffline() {

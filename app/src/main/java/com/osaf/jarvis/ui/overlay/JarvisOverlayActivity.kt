@@ -77,10 +77,7 @@ class JarvisOverlayActivity : ComponentActivity() {
                         pendingConfirmation = pendingConfirmation,
                         isListening = isListening,
                         isSpeaking = isSpeaking,
-                        onMicClick = {
-                            if (isListening) coordinator.cancelVoiceCommand()
-                            else coordinator.startVoiceCommand(openBottomSheet = true)
-                        },
+                        onMicClick = { coordinator.onOrbOrMicTapped() },
                         onStopSpeaking = { coordinator.stopSpeaking() },
                         onConfirmAction = {
                             coordinator.confirmPendingAction()

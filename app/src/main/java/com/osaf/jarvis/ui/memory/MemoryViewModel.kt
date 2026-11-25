@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.osaf.jarvis.JarvisApplication
+import com.osaf.jarvis.database.CommandStatEntity
+import com.osaf.jarvis.database.MemoryFactEntity
 import com.osaf.jarvis.database.NoteEntity
 import com.osaf.jarvis.database.ReminderEntity
 import com.osaf.jarvis.notifications.NotificationHelper
@@ -36,6 +38,12 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     val reminders: StateFlow<List<ReminderEntity>> = memoryRepo.reminders
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val memoryFacts: StateFlow<List<MemoryFactEntity>> = memoryRepo.memoryFacts
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val topCommands: StateFlow<List<CommandStatEntity>> = memoryRepo.topCommands
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _statusBanner = MutableStateFlow<String?>(null)
     val statusBanner: StateFlow<String?> = _statusBanner.asStateFlow()
 
@@ -43,11 +51,31 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
         _searchQuery.value = q
     }
 
+    fun addMemoryFact(category: String, key: String, value: String) {
+        if (key.isBlank() || value.isBlank()) return
+        viewModelScope.launch {
+            memoryRepo.upsertMemoryFact(category, key, value, importance = 3)
+            _statusBanner.value = "Saved \"$key\" to JARVIS long-term memory."
+        }
+    }
+
+    fun updateMemoryFact(fact: MemoryFactEntity, newValue: String) {
+        if (newValue.isBlank()) return
+        viewModelScope.launch {
+            memoryRepo.updateMemoryFact(fact.copy(factValue = newValue.trim()))
+            _statusBanner.value = "Updated memory \"${fact.factKey}\"."
+        }
+    }
+
+    fun deleteMemoryFact(id: Long) {
+        viewModelScope.launch { memoryRepo.deleteMemoryFact(id) }
+    }
+
     fun addNote(title: String, content: String, category: String) {
         if (content.isBlank()) return
         viewModelScope.launch {
             memoryRepo.addNote(title, content, category)
-            _statusBanner.value = "Note saved to encrypted-device local storage."
+            _statusBanner.value = "Note saved to local storage."
         }
     }
 
@@ -85,7 +113,7 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     fun clearAllMemories() {
         viewModelScope.launch {
             memoryRepo.clearAllMemories()
-            _statusBanner.value = "All local notes and reminders cleared."
+            _statusBanner.value = "All local notes, reminders, and memory facts cleared."
         }
     }
 
@@ -116,7 +144,7 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
                 val result = backupManager.importFromJson(json)
                 result.onSuccess { summary ->
                     _statusBanner.value =
-                        "Imported ${summary.notesImported} notes and ${summary.remindersImported} reminders."
+                        "Imported ${summary.notesImported} notes, ${summary.remindersImported} reminders, and ${summary.factsImported} memory facts."
                 }.onFailure { err ->
                     _statusBanner.value = "Import failed: ${err.localizedMessage ?: "invalid file"}"
                 }

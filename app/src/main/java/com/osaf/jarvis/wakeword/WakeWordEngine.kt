@@ -4,6 +4,10 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
+import android.os.SystemClock
+import com.osaf.jarvis.utils.PerformanceMetrics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -13,17 +17,22 @@ import kotlinx.coroutines.launch
 import kotlin.math.sqrt
 
 /**
- * Lightweight acoustic Voice-Activity & Energy Gate for wake-phrase detection.
+ * Low-power acoustic Voice-Activity & Noise-Suppressed Wake Gate.
  *
- * Properly releases AudioRecord hardware BEFORE invoking SpeechRecognizer so Android's
- * microphone lock never blocks wake-word speech verification, and resumes after completion.
+ * Uses hardware NoiseSuppressor + AcousticEchoCanceler (when available) plus
+ * adaptive noise-floor tracking and Zero-Crossing Rate (ZCR) speech band filtering
+ * to detect quiet speech at varying distances while minimizing false triggers.
+ * Releases AudioRecord hardware cleanly before handing off to SpeechRecognizer.
  */
 class WakeWordEngine {
 
     private var monitorJob: Job? = null
 
     fun matchesWakePhrase(transcript: String, assistantName: String): Boolean {
-        val normalized = transcript.lowercase()
+        val rawTrimmed = transcript.trim()
+        if (rawTrimmed.contains("جاروس")) return true
+
+        val normalized = rawTrimmed.lowercase()
             .replace(Regex("[^a-z0-9\\s]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
@@ -49,8 +58,10 @@ class WakeWordEngine {
             "jarvis",
             "jarvish",
             "jarves",
-            "jarvas"
-        )
+            "jarvas",
+            "service" // common quiet-speech STT phonetic confusion when paired with "hey service"
+        ).filter { it != "service" || normalized.startsWith("hey service") }
+
         return candidates.any { phrase ->
             normalized == phrase ||
                 normalized.startsWith("$phrase ") ||
@@ -76,17 +87,33 @@ class WakeWordEngine {
             ).coerceAtLeast(2048)
 
             var audioRecord: AudioRecord? = null
+            var noiseSuppressor: NoiseSuppressor? = null
+            var echoCanceler: AcousticEchoCanceler? = null
+
             try {
                 audioRecord = createAudioRecord(sampleRate, minBuffer)
                 if (audioRecord == null || audioRecord.state != AudioRecord.STATE_INITIALIZED) {
                     onError("Microphone hardware could not initialize for wake-word monitoring.")
                     return@launch
                 }
+
                 val activeRecord = audioRecord
+                val sessionId = activeRecord.audioSessionId
+                if (NoiseSuppressor.isAvailable()) {
+                    noiseSuppressor = runCatching {
+                        NoiseSuppressor.create(sessionId)?.apply { enabled = true }
+                    }.getOrNull()
+                }
+                if (AcousticEchoCanceler.isAvailable()) {
+                    echoCanceler = runCatching {
+                        AcousticEchoCanceler.create(sessionId)?.apply { enabled = true }
+                    }.getOrNull()
+                }
+
                 activeRecord.startRecording()
                 val buffer = ShortArray(1024)
                 var consecutiveVoiceFrames = 0
-                var ambientFloor = 140.0
+                var ambientFloor = 110.0
                 var frameCount = 0
 
                 while (isActive) {
@@ -94,35 +121,43 @@ class WakeWordEngine {
                     if (read <= 0) continue
 
                     var sumSq = 0.0
+                    var zeroCrossings = 0
+                    var prevSample = buffer[0].toInt()
                     for (i in 0 until read) {
-                        val s = buffer[i].toDouble()
-                        sumSq += s * s
+                        val s = buffer[i].toInt()
+                        sumSq += s.toDouble() * s.toDouble()
+                        if ((s >= 0 && prevSample < 0) || (s < 0 && prevSample >= 0)) {
+                            zeroCrossings++
+                        }
+                        prevSample = s
                     }
                     val rms = sqrt(sumSq / read)
+                    val zcrRatio = zeroCrossings.toDouble() / read
                     frameCount++
 
-                    // Track quiet ambient floor smoothly
-                    if (frameCount <= 8 || rms < ambientFloor * 1.4) {
-                        ambientFloor = (ambientFloor * 0.9) + (rms * 0.1)
+                    // Smoothly adapt to room noise floor during silence
+                    if (frameCount <= 10 || rms < ambientFloor * 1.35) {
+                        ambientFloor = (ambientFloor * 0.90) + (rms * 0.10)
                     }
 
-                    // Responsive threshold: sensitivity 0.65 -> ~260 RMS above ambient floor
+                    // Quiet speech sensitivity curve: sensitivity 0.72 -> ~185 RMS above floor
                     val sensitivity = getSensitivity().coerceIn(0.2f, 0.95f)
-                    val baseGate = 650.0 - (sensitivity * 480.0)
-                    val threshold = maxOf(baseGate, ambientFloor * (2.6 - sensitivity))
+                    val baseGate = 540.0 - (sensitivity * 430.0)
+                    val threshold = maxOf(baseGate, ambientFloor * (2.35 - sensitivity * 0.85))
+                    val looksLikeSpeechBand = zcrRatio in 0.015..0.42
 
-                    if (rms > threshold) {
+                    if (rms > threshold && looksLikeSpeechBand) {
                         consecutiveVoiceFrames++
                         if (consecutiveVoiceFrames >= 2) {
-                            // Release AudioRecord BEFORE invoking SpeechRecognizer!
-                            try {
-                                activeRecord.stop()
-                            } catch (_: Exception) { }
-                            try {
-                                activeRecord.release()
-                            } catch (_: Exception) { }
+                            val t0 = SystemClock.elapsedRealtime()
+                            releaseEffects(noiseSuppressor, echoCanceler)
+                            noiseSuppressor = null
+                            echoCanceler = null
+                            runCatching { activeRecord.stop() }
+                            runCatching { activeRecord.release() }
                             audioRecord = null
-                            delay(120L)
+                            delay(80L)
+                            PerformanceMetrics.recordWakeToReady(SystemClock.elapsedRealtime() - t0)
                             onSpeechTrigger()
                             return@launch
                         }
@@ -135,14 +170,16 @@ class WakeWordEngine {
             } catch (e: Exception) {
                 onError("Wake-word monitor stopped: ${e.localizedMessage ?: "audio error"}")
             } finally {
-                try {
-                    audioRecord?.stop()
-                } catch (_: Exception) { }
-                try {
-                    audioRecord?.release()
-                } catch (_: Exception) { }
+                releaseEffects(noiseSuppressor, echoCanceler)
+                runCatching { audioRecord?.stop() }
+                runCatching { audioRecord?.release() }
             }
         }
+    }
+
+    private fun releaseEffects(ns: NoiseSuppressor?, aec: AcousticEchoCanceler?) {
+        runCatching { ns?.release() }
+        runCatching { aec?.release() }
     }
 
     @SuppressLint("MissingPermission")

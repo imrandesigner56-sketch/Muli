@@ -32,3 +32,22 @@ data class ChatMessageEntity(
     val source: String = "offline", // "online", "offline", "command"
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "memory_facts")
+data class MemoryFactEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val category: String, // "Preference", "Project", "Instruction", "Personal"
+    val factKey: String,
+    val factValue: String,
+    val importance: Int = 1,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "command_stats")
+data class CommandStatEntity(
+    @PrimaryKey val commandKey: String,
+    val samplePhrase: String,
+    val usageCount: Int = 1,
+    val lastUsedAt: Long = System.currentTimeMillis()
+)

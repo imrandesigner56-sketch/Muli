@@ -1,22 +1,29 @@
 package com.osaf.jarvis
 
+import com.osaf.jarvis.ai.AiAttachmentContext
 import com.osaf.jarvis.ai.AiStreamEvent
 import com.osaf.jarvis.ai.OfflineAiEngine
 import com.osaf.jarvis.ai.OpenAiClient
+import com.osaf.jarvis.ai.PersonalityEngine
+import com.osaf.jarvis.ai.WebSearchTool
 import com.osaf.jarvis.commands.CommandInterpreter
 import com.osaf.jarvis.commands.CommandOutcome
 import com.osaf.jarvis.commands.PendingConfirmation
 import com.osaf.jarvis.database.ChatRepository
 import com.osaf.jarvis.database.JarvisSettings
 import com.osaf.jarvis.database.MemoryRepository
+import com.osaf.jarvis.database.NeuralTtsProvider
 import com.osaf.jarvis.database.SettingsRepository
 import com.osaf.jarvis.device.DeviceActionResult
 import com.osaf.jarvis.device.DeviceController
 import com.osaf.jarvis.utils.LanguageMode
+import com.osaf.jarvis.utils.PreparedAttachment
+import com.osaf.jarvis.voice.SpeechSentenceChunker
 import com.osaf.jarvis.voice.VoiceEngine
 import com.osaf.jarvis.wakeword.WakeWordEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,6 +52,8 @@ class JarvisCoordinator(
     private val commandInterpreter: CommandInterpreter,
     private val openAiClient: OpenAiClient,
     private val offlineAiEngine: OfflineAiEngine,
+    private val personalityEngine: PersonalityEngine,
+    private val webSearchTool: WebSearchTool,
     private val voiceEngine: VoiceEngine,
     private val wakeWordEngine: WakeWordEngine
 ) {
@@ -57,7 +66,7 @@ class JarvisCoordinator(
     private val _lastTranscript = MutableStateFlow("")
     val lastTranscript: StateFlow<String> = _lastTranscript.asStateFlow()
 
-    private val _lastResponse = MutableStateFlow("Hey Sir! I'm JARVIS — tap the mic or say \"Hey JARVIS\" anytime.")
+    private val _lastResponse = MutableStateFlow("Hey Osaf! I'm JARVIS — tap the mic or say \"Hey JARVIS\" anytime.")
     val lastResponse: StateFlow<String> = _lastResponse.asStateFlow()
 
     private val _streamingResponse = MutableStateFlow("")
@@ -71,6 +80,9 @@ class JarvisCoordinator(
 
     private val _isAppInForeground = MutableStateFlow(false)
     val isAppInForeground: StateFlow<Boolean> = _isAppInForeground.asStateFlow()
+
+    private val _isVoiceSessionActive = MutableStateFlow(false)
+    val isVoiceSessionActive: StateFlow<Boolean> = _isVoiceSessionActive.asStateFlow()
 
     val isOnlineActive: StateFlow<Boolean> = combine(
         deviceController.isNetworkConnected,
@@ -98,6 +110,33 @@ class JarvisCoordinator(
 
     private var lastProcessedText = ""
     private var lastProcessedAt = 0L
+    private var activeAiJob: Job? = null
+    private var checkedInactivityOnLaunch = false
+
+    init {
+        voiceEngine.setBargeInHandler {
+            handleBargeInInterrupt()
+        }
+        checkInactivityGreetingOnLaunch()
+    }
+
+    private fun checkInactivityGreetingOnLaunch() {
+        if (checkedInactivityOnLaunch) return
+        checkedInactivityOnLaunch = true
+        scope.launch {
+            val settings = settingsRepository.settingsFlow.first()
+            if (personalityEngine.shouldGreetForInactivity(settings.lastInteractionAt, settings.lastInactivityGreetingDay)) {
+                val greeting = personalityEngine.buildInactivityGreeting(settings.userDisplayName, settings.preferredLanguage)
+                _lastResponse.value = greeting
+                settingsRepository.markInactivityGreetingShown(personalityEngine.todayKey())
+            } else {
+                val user = settings.userDisplayName
+                if (_lastTranscript.value.isBlank()) {
+                    _lastResponse.value = "Hey $user! I'm ${settings.assistantName} — tap the mic or say \"Hey ${settings.assistantName}\" anytime."
+                }
+            }
+        }
+    }
 
     fun setAppForeground(inForeground: Boolean) {
         _isAppInForeground.value = inForeground
@@ -109,12 +148,39 @@ class JarvisCoordinator(
 
     fun dismissBottomPopup() {
         _isBottomPopupVisible.value = false
+        _isVoiceSessionActive.value = false
+        activeAiJob?.cancel()
+        _isThinking.value = false
         voiceEngine.cancelListening()
+        voiceEngine.stopSpeaking()
         _errorBanner.value = null
+    }
+
+    /**
+     * Interrupts current AI response / TTS immediately and opens microphone (Barge-In).
+     */
+    fun handleBargeInInterrupt() {
+        activeAiJob?.cancel()
+        _isThinking.value = false
+        _streamingResponse.value = ""
+        voiceEngine.stopSpeaking()
+        startVoiceCommand(openBottomSheet = _isBottomPopupVisible.value)
+    }
+
+    fun onOrbOrMicTapped() {
+        when {
+            voiceEngine.isSpeaking.value -> handleBargeInInterrupt()
+            voiceEngine.isListening.value -> {
+                _isVoiceSessionActive.value = false
+                cancelVoiceCommand()
+            }
+            else -> startVoiceCommand(openBottomSheet = true)
+        }
     }
 
     fun startVoiceCommand(openBottomSheet: Boolean = true) {
         _errorBanner.value = null
+        _isVoiceSessionActive.value = true
         if (openBottomSheet) {
             _isBottomPopupVisible.value = true
         }
@@ -128,6 +194,7 @@ class JarvisCoordinator(
                     submitUserInput(spoken, fromVoice = true)
                 },
                 onError = { errMsg ->
+                    _isVoiceSessionActive.value = false
                     _errorBanner.value = errMsg
                     _lastResponse.value = errMsg
                 }
@@ -136,10 +203,12 @@ class JarvisCoordinator(
     }
 
     fun cancelVoiceCommand() {
+        _isVoiceSessionActive.value = false
         voiceEngine.cancelListening()
     }
 
     fun stopSpeaking() {
+        _isVoiceSessionActive.value = false
         voiceEngine.stopSpeaking()
     }
 
@@ -147,16 +216,12 @@ class JarvisCoordinator(
         _errorBanner.value = null
     }
 
-    /**
-     * Suspends until JARVIS finishes listening, thinking, and speaking so
-     * background wake-word monitoring never interrupts or hears its own reply.
-     */
     suspend fun awaitAssistantIdle() {
         delay(250L)
-        while (voiceEngine.isListening.value || _isThinking.value || voiceEngine.isSpeaking.value) {
+        while (voiceEngine.isListening.value || _isThinking.value || voiceEngine.isSpeaking.value || _isVoiceSessionActive.value) {
             delay(250L)
         }
-        delay(600L)
+        delay(500L)
     }
 
     fun triggerWakePhraseVerification(
@@ -167,12 +232,14 @@ class JarvisCoordinator(
         scope.launch {
             val settings = settingsRepository.settingsFlow.first()
             val online = deviceController.isNetworkConnected.value && settings.preferOnlineMode
+            val ttsKey = resolveTtsKey(settings)
             voiceEngine.startListening(
                 languageMode = settings.preferredLanguage,
                 preferOffline = !online,
                 onResult = { transcript ->
                     if (wakeWordEngine.matchesWakePhrase(transcript, assistantName)) {
                         _errorBanner.value = null
+                        _isVoiceSessionActive.value = true
                         _isBottomPopupVisible.value = true
                         onWakeConfirmed()
                         val remainder = commandInterpreter.stripWakePhrase(transcript, assistantName)
@@ -180,7 +247,9 @@ class JarvisCoordinator(
                             submitUserInput(transcript, fromVoice = true)
                             onFinished()
                         } else {
-                            val greet = if (settings.preferredLanguage == LanguageMode.ROMAN_URDU) {
+                            val greet = if (settings.preferredLanguage == LanguageMode.URDU) {
+                                "جی ${settings.userDisplayName}، میں سن رہا ہوں! بتائیے؟"
+                            } else if (settings.preferredLanguage == LanguageMode.ROMAN_URDU || settings.preferredLanguage == LanguageMode.AUTO) {
                                 "Haan ji ${settings.userDisplayName}, main sun raha hoon! Batayein?"
                             } else {
                                 "Hey ${settings.userDisplayName}! I'm listening — what's up?"
@@ -199,6 +268,7 @@ class JarvisCoordinator(
                                             onFinished()
                                         },
                                         onError = { errMsg ->
+                                            _isVoiceSessionActive.value = false
                                             _errorBanner.value = errMsg
                                             onFinished()
                                         }
@@ -208,12 +278,12 @@ class JarvisCoordinator(
                             }
 
                             if (settings.ttsAutoSpeak) {
-                                voiceEngine.speakAndThen(
+                                voiceEngine.speak(
                                     text = greet,
-                                    languageMode = LanguageMode.ENGLISH,
-                                    speechRate = settings.speechSpeed,
-                                    speechPitch = settings.speechPitch,
-                                    selectedVoiceName = settings.selectedVoiceName,
+                                    languageMode = settings.preferredLanguage,
+                                    settings = settings,
+                                    ttsApiKey = ttsKey,
+                                    allowNeural = online && ttsKey.isNotBlank() && settings.neuralTtsProvider != NeuralTtsProvider.DEVICE_BEST,
                                     onDone = startFollowUpListen
                                 )
                             } else {
@@ -252,122 +322,93 @@ class JarvisCoordinator(
             if (settings.saveChatHistory) {
                 chatRepository.addMessage("assistant", reply, "en", "command")
             }
-            if (settings.ttsAutoSpeak) {
-                voiceEngine.speak(reply, LanguageMode.ENGLISH, settings.speechSpeed, settings.speechPitch, settings.selectedVoiceName)
-            }
+            speakSingleReply(reply, LanguageMode.ENGLISH, settings, continueSession = false)
         }
     }
 
     fun cancelPendingAction() {
         _pendingConfirmation.value = null
-        _lastResponse.value = "No problem, cancelled that for you, Sir."
+        _lastResponse.value = "No problem, cancelled that."
     }
 
-    fun submitUserInput(rawText: String, fromVoice: Boolean = false) {
+    fun submitUserInput(
+        rawText: String,
+        fromVoice: Boolean = false,
+        attachment: PreparedAttachment? = null
+    ) {
         val trimmed = rawText.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty() && attachment == null) return
 
+        val effectivePrompt = if (trimmed.isNotEmpty()) trimmed else "Analyze the attached ${attachment?.displayName ?: "file"}."
         val now = System.currentTimeMillis()
-        if (trimmed.equals(lastProcessedText, ignoreCase = true) && (now - lastProcessedAt) < 1200L) {
+        if (attachment == null && effectivePrompt.equals(lastProcessedText, ignoreCase = true) && (now - lastProcessedAt) < 1200L) {
             return
         }
-        lastProcessedText = trimmed
+        lastProcessedText = effectivePrompt
         lastProcessedAt = now
 
         _errorBanner.value = null
-        _lastTranscript.value = trimmed
+        _lastTranscript.value = if (attachment != null) "$effectivePrompt [${attachment.displayName}]" else effectivePrompt
         _isThinking.value = true
         _streamingResponse.value = ""
 
-        scope.launch {
+        activeAiJob?.cancel()
+        activeAiJob = scope.launch {
             val settings = settingsRepository.settingsFlow.first()
+            settingsRepository.recordInteraction()
+
             try {
-                when (val outcome = commandInterpreter.interpretAndExecute(trimmed)) {
+                // If user attached an image or document, go straight to Online AI Vision/Doc pipeline
+                if (attachment != null) {
+                    val lang = com.osaf.jarvis.utils.LanguageDetector.detect(effectivePrompt, settings.preferredLanguage)
+                    val mood = personalityEngine.detectMood(effectivePrompt)
+                    val aiAttachment = AiAttachmentContext(
+                        imageBase64Jpeg = attachment.imageBase64Jpeg,
+                        documentName = attachment.displayName,
+                        documentExcerpt = attachment.documentExcerpt
+                    )
+                    runOnlineAiPipeline(
+                        rawDisplayPrompt = _lastTranscript.value,
+                        cleanedPrompt = effectivePrompt,
+                        lang = lang,
+                        mood = mood,
+                        settings = settings,
+                        fromVoice = fromVoice,
+                        attachment = aiAttachment
+                    )
+                    return@launch
+                }
+
+                when (val outcome = commandInterpreter.interpretAndExecute(effectivePrompt)) {
                     is CommandOutcome.Handled -> {
                         if (settings.saveChatHistory) {
-                            chatRepository.addMessage("user", trimmed, outcome.language.code, if (fromVoice) "voice" else "text")
+                            chatRepository.addMessage("user", effectivePrompt, outcome.language.code, if (fromVoice) "voice" else "text")
                             chatRepository.addMessage("assistant", outcome.responseText, outcome.language.code, outcome.source)
                         }
                         _pendingConfirmation.value = outcome.confirmation
                         _lastResponse.value = outcome.responseText
                         _isThinking.value = false
-                        speakIfEnabled(outcome.responseText, outcome.language, settings)
+                        val shouldContinue = fromVoice && settings.continuousConversation &&
+                            !outcome.shouldEndVoiceSession && outcome.confirmation == null
+                        if (!shouldContinue) _isVoiceSessionActive.value = false
+                        speakSingleReply(outcome.responseText, outcome.language, settings, continueSession = shouldContinue)
                     }
 
                     is CommandOutcome.NeedsOnlineAi -> {
-                        if (settings.saveChatHistory) {
-                            chatRepository.addMessage("user", trimmed, outcome.language.code, if (fromVoice) "voice" else "text")
-                        }
-                        val hasNet = deviceController.checkCurrentConnectivity()
-                        val apiKey = settingsRepository.getDecryptedApiKey()
-
-                        if (!settings.preferOnlineMode || !hasNet || apiKey.isBlank()) {
-                            val reason = when {
-                                !settings.preferOnlineMode -> "Online Mode is switched off in Settings."
-                                !hasNet -> "No internet connection right now."
-                                else -> "Add your API key in Settings to enable cloud replies."
-                            }
-                            val fallback = offlineAiEngine.buildOfflineFallbackResponse(
-                                userDisplayName = settings.userDisplayName,
-                                assistantName = settings.assistantName,
-                                language = outcome.language,
-                                reason = reason
-                            )
-                            if (settings.saveChatHistory) {
-                                chatRepository.addMessage("assistant", fallback, outcome.language.code, "offline")
-                            }
-                            _lastResponse.value = fallback
-                            _isThinking.value = false
-                            speakIfEnabled(fallback, outcome.language, settings)
-                            return@launch
-                        }
-
-                        val history = if (settings.saveChatHistory) chatRepository.getRecentContext(10) else emptyList()
-                        val notes = if (settings.shareNotesWithOnlineAi) memoryRepository.getNotesSnapshot() else emptyList()
-                        val buffer = StringBuilder()
-
-                        openAiClient.streamChatCompletion(
+                        runOnlineAiPipeline(
+                            rawDisplayPrompt = effectivePrompt,
+                            cleanedPrompt = outcome.cleanedQuery,
+                            lang = outcome.language,
+                            mood = outcome.mood,
                             settings = settings,
-                            apiKey = apiKey,
-                            userPrompt = outcome.cleanedQuery,
-                            history = history,
-                            detectedLanguage = outcome.language,
-                            sharedNotes = notes
-                        ).collect { event ->
-                            when (event) {
-                                is AiStreamEvent.Delta -> {
-                                    buffer.append(event.chunk)
-                                    _streamingResponse.value = buffer.toString()
-                                    _lastResponse.value = buffer.toString()
-                                }
-
-                                is AiStreamEvent.Completed -> {
-                                    _streamingResponse.value = ""
-                                    _lastResponse.value = event.fullText
-                                    _isThinking.value = false
-                                    if (settings.saveChatHistory) {
-                                        chatRepository.addMessage("assistant", event.fullText, outcome.language.code, "online")
-                                    }
-                                    speakIfEnabled(event.fullText, outcome.language, settings)
-                                }
-
-                                is AiStreamEvent.Error -> {
-                                    _streamingResponse.value = ""
-                                    _isThinking.value = false
-                                    _errorBanner.value = event.message
-                                    val safeMsg = "Sorry ${settings.userDisplayName}, ${event.message}"
-                                    _lastResponse.value = safeMsg
-                                    if (settings.saveChatHistory) {
-                                        chatRepository.addMessage("assistant", safeMsg, outcome.language.code, "error")
-                                    }
-                                    speakIfEnabled(safeMsg, outcome.language, settings)
-                                }
-                            }
-                        }
+                            fromVoice = fromVoice,
+                            attachment = null
+                        )
                     }
                 }
             } catch (e: Exception) {
                 _isThinking.value = false
+                _isVoiceSessionActive.value = false
                 val msg = e.localizedMessage ?: "Command processing error."
                 _errorBanner.value = msg
                 _lastResponse.value = msg
@@ -375,15 +416,209 @@ class JarvisCoordinator(
         }
     }
 
-    private fun speakIfEnabled(text: String, lang: LanguageMode, settings: JarvisSettings) {
-        if (settings.ttsAutoSpeak) {
-            voiceEngine.speak(
-                text = text,
-                languageMode = lang,
-                speechRate = settings.speechSpeed,
-                speechPitch = settings.speechPitch,
-                selectedVoiceName = settings.selectedVoiceName
+    private suspend fun runOnlineAiPipeline(
+        rawDisplayPrompt: String,
+        cleanedPrompt: String,
+        lang: LanguageMode,
+        mood: com.osaf.jarvis.ai.UserMood,
+        settings: JarvisSettings,
+        fromVoice: Boolean,
+        attachment: AiAttachmentContext?
+    ) {
+        if (settings.saveChatHistory) {
+            chatRepository.addMessage("user", rawDisplayPrompt, lang.code, if (fromVoice) "voice" else "text")
+        }
+        val hasNet = deviceController.checkCurrentConnectivity()
+        val apiKey = settingsRepository.getDecryptedApiKey()
+
+        val webResult = if (hasNet && settings.preferOnlineMode && attachment == null && webSearchTool.looksLikeWebLookupQuery(cleanedPrompt)) {
+            webSearchTool.searchLiveKnowledge(cleanedPrompt)
+        } else {
+            null
+        }
+
+        if (!settings.preferOnlineMode || !hasNet || apiKey.isBlank()) {
+            // If user specifically asked a web lookup while online without LLM key, return the real web summary!
+            val replyText = if (webResult != null) {
+                if (settings.saveChatHistory) {
+                    chatRepository.addMessage("assistant", webResult.summary, lang.code, "web")
+                }
+                webResult.summary
+            } else {
+                val reason = when {
+                    !settings.preferOnlineMode -> "Online Mode is switched off in Settings."
+                    !hasNet -> "No internet connection right now."
+                    else -> "Add your HTTPS API key in Settings to unlock full AI & Vision."
+                }
+                val fallback = offlineAiEngine.buildOfflineFallbackResponse(
+                    userDisplayName = settings.userDisplayName,
+                    assistantName = settings.assistantName,
+                    language = lang,
+                    reason = reason
+                )
+                if (settings.saveChatHistory) {
+                    chatRepository.addMessage("assistant", fallback, lang.code, "offline")
+                }
+                fallback
+            }
+            _lastResponse.value = replyText
+            _isThinking.value = false
+            val shouldContinue = fromVoice && settings.continuousConversation
+            if (!shouldContinue) _isVoiceSessionActive.value = false
+            speakSingleReply(replyText, lang, settings, continueSession = shouldContinue)
+            return
+        }
+
+        val history = if (settings.saveChatHistory) chatRepository.getRecentContext(10) else emptyList()
+        val memoryFacts = if (settings.shareMemoryWithOnlineAi) memoryRepository.getFactsSnapshot() else emptyList()
+        val notes = if (settings.shareNotesWithOnlineAi) memoryRepository.getNotesSnapshot() else emptyList()
+        val buffer = StringBuilder()
+        val sentenceChunker = SpeechSentenceChunker()
+        val ttsKey = resolveTtsKey(settings, fallbackMainKey = apiKey)
+        val allowNeural = hasNet && settings.neuralTtsProvider != NeuralTtsProvider.DEVICE_BEST && ttsKey.isNotBlank()
+        var spokeStreamingChunks = false
+
+        openAiClient.streamChatCompletion(
+            settings = settings,
+            apiKey = apiKey,
+            userPrompt = cleanedPrompt,
+            history = history,
+            detectedLanguage = lang,
+            mood = mood,
+            memoryFacts = memoryFacts,
+            sharedNotes = notes,
+            webContext = webResult,
+            attachment = attachment
+        ).collect { event ->
+            when (event) {
+                is AiStreamEvent.Delta -> {
+                    buffer.append(event.chunk)
+                    _streamingResponse.value = buffer.toString()
+                    _lastResponse.value = buffer.toString()
+
+                    if (settings.ttsAutoSpeak) {
+                        val readySentences = sentenceChunker.appendAndExtract(event.chunk)
+                        for (sentence in readySentences) {
+                            spokeStreamingChunks = true
+                            voiceEngine.enqueueSpeech(
+                                text = sentence,
+                                languageMode = lang,
+                                settings = settings,
+                                ttsApiKey = ttsKey,
+                                allowNeural = allowNeural
+                            )
+                        }
+                    }
+                }
+
+                is AiStreamEvent.Completed -> {
+                    _streamingResponse.value = ""
+                    _lastResponse.value = event.fullText
+                    _isThinking.value = false
+                    if (settings.saveChatHistory) {
+                        chatRepository.addMessage(
+                            "assistant",
+                            event.fullText,
+                            lang.code,
+                            if (webResult != null) "web+ai" else "online"
+                        )
+                    }
+
+                    val shouldContinue = fromVoice && settings.continuousConversation
+                    if (!shouldContinue) _isVoiceSessionActive.value = false
+
+                    if (settings.ttsAutoSpeak) {
+                        val tail = sentenceChunker.flushRemaining()
+                        if (!spokeStreamingChunks) {
+                            speakSingleReply(event.fullText, lang, settings, continueSession = shouldContinue)
+                        } else if (!tail.isNullOrBlank()) {
+                            voiceEngine.enqueueSpeech(
+                                text = tail,
+                                languageMode = lang,
+                                settings = settings,
+                                ttsApiKey = ttsKey,
+                                allowNeural = allowNeural,
+                                onDone = if (shouldContinue) ({ continueVoiceTurn(settings) }) else null
+                            )
+                        } else if (shouldContinue) {
+                            // Append an empty sentinel callback when queue drains
+                            voiceEngine.enqueueSpeech(
+                                text = "",
+                                languageMode = lang,
+                                settings = settings,
+                                onDone = { continueVoiceTurn(settings) }
+                            )
+                        }
+                    } else if (shouldContinue) {
+                        continueVoiceTurn(settings)
+                    }
+                }
+
+                is AiStreamEvent.Error -> {
+                    sentenceChunker.reset()
+                    _streamingResponse.value = ""
+                    _isThinking.value = false
+                    _isVoiceSessionActive.value = false
+                    _errorBanner.value = event.message
+                    val safeMsg = "Sorry ${settings.userDisplayName}, ${event.message}"
+                    _lastResponse.value = safeMsg
+                    if (settings.saveChatHistory) {
+                        chatRepository.addMessage("assistant", safeMsg, lang.code, "error")
+                    }
+                    speakSingleReply(safeMsg, lang, settings, continueSession = false)
+                }
+            }
+        }
+    }
+
+    private suspend fun speakSingleReply(
+        text: String,
+        lang: LanguageMode,
+        settings: JarvisSettings,
+        continueSession: Boolean
+    ) {
+        if (!settings.ttsAutoSpeak) {
+            if (continueSession) continueVoiceTurn(settings)
+            return
+        }
+        val online = deviceController.checkCurrentConnectivity() && settings.preferOnlineMode
+        val ttsKey = resolveTtsKey(settings)
+        val allowNeural = online && ttsKey.isNotBlank() && settings.neuralTtsProvider != NeuralTtsProvider.DEVICE_BEST
+        voiceEngine.speak(
+            text = text,
+            languageMode = lang,
+            settings = settings,
+            ttsApiKey = ttsKey,
+            allowNeural = allowNeural,
+            onDone = if (continueSession) ({ continueVoiceTurn(settings) }) else null
+        )
+    }
+
+    private fun continueVoiceTurn(settings: JarvisSettings) {
+        if (!_isVoiceSessionActive.value) return
+        scope.launch {
+            delay(220L)
+            if (!_isVoiceSessionActive.value) return@launch
+            val online = deviceController.isNetworkConnected.value && settings.preferOnlineMode
+            voiceEngine.startListening(
+                languageMode = settings.preferredLanguage,
+                preferOffline = !online,
+                onResult = { followUp ->
+                    submitUserInput(followUp, fromVoice = true)
+                },
+                onError = {
+                    _isVoiceSessionActive.value = false
+                }
             )
         }
+    }
+
+    private suspend fun resolveTtsKey(settings: JarvisSettings, fallbackMainKey: String? = null): String {
+        val dedicated = settingsRepository.getDecryptedTtsApiKey()
+        if (dedicated.isNotBlank()) return dedicated
+        if (settings.neuralTtsProvider == NeuralTtsProvider.OPENAI || settings.neuralTtsProvider == NeuralTtsProvider.CUSTOM_HTTPS) {
+            return fallbackMainKey ?: settingsRepository.getDecryptedApiKey()
+        }
+        return ""
     }
 }

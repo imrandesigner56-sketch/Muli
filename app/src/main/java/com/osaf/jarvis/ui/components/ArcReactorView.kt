@@ -307,7 +307,11 @@ fun ArcReactorView(
                     color = hud.textPrimary
                 )
                 Text(
-                    text = "Tap to talk",
+                    text = when (state) {
+                        ReactorState.SPEAKING -> "Tap to interrupt"
+                        ReactorState.LISTENING -> "Tap to stop"
+                        else -> "Tap to talk"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = hud.textSecondary
                 )

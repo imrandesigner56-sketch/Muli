@@ -2,9 +2,10 @@ package com.osaf.jarvis.ui.memory
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,13 +21,17 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,29 +51,34 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.osaf.jarvis.database.MemoryFactEntity
 import com.osaf.jarvis.ui.components.HudGlassCard
 import com.osaf.jarvis.ui.theme.LocalJarvisHudColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
     val hud = LocalJarvisHudColors.current
     val notes by viewModel.notes.collectAsStateWithLifecycle()
     val reminders by viewModel.reminders.collectAsStateWithLifecycle()
+    val memoryFacts by viewModel.memoryFacts.collectAsStateWithLifecycle()
+    val topCommands by viewModel.topCommands.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val banner by viewModel.statusBanner.collectAsStateWithLifecycle()
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddNote by remember { mutableStateOf(false) }
     var showAddReminder by remember { mutableStateOf(false) }
+    var showAddFact by remember { mutableStateOf(false) }
+    var editingFact by remember { mutableStateOf<MemoryFactEntity?>(null) }
     var showClearConfirm by remember { mutableStateOf(false) }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -86,9 +96,15 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
     Scaffold(
         containerColor = hud.spaceBlack,
         floatingActionButton = {
-            if (selectedTab == 0 || selectedTab == 1) {
+            if (selectedTab in 0..2) {
                 FloatingActionButton(
-                    onClick = { if (selectedTab == 0) showAddNote = true else showAddReminder = true },
+                    onClick = {
+                        when (selectedTab) {
+                            0 -> showAddNote = true
+                            1 -> showAddReminder = true
+                            2 -> showAddFact = true
+                        }
+                    },
                     containerColor = hud.primaryGlow,
                     contentColor = hud.onPrimaryAccent,
                     modifier = Modifier.testTag("memory_add_fab")
@@ -106,12 +122,12 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
         ) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Notes & Memory",
+                text = "Memory & Notes",
                 style = MaterialTheme.typography.headlineSmall,
                 color = hud.textPrimary
             )
             Text(
-                text = "Saved Notes, Reminders & Backups",
+                text = "Notes, Reminders, Personal Facts & Backups",
                 style = MaterialTheme.typography.labelMedium,
                 color = hud.textSecondary
             )
@@ -136,9 +152,10 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
                 containerColor = hud.deepNavy,
                 contentColor = hud.primaryGlow
             ) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Notes (${notes.size})") })
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Reminders (${reminders.size})") })
-                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Backup") })
+                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Notes (${notes.size})", maxLines = 1) })
+                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Alerts (${reminders.size})", maxLines = 1) })
+                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Brain (${memoryFacts.size})", maxLines = 1) })
+                Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("Backup", maxLines = 1) })
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -246,13 +263,88 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
                 }
 
                 2 -> {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        if (topCommands.isNotEmpty()) {
+                            item {
+                                HudGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("FREQUENT COMMANDS", style = MaterialTheme.typography.labelMedium, color = hud.primaryGlow)
+                                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            topCommands.forEach { stat ->
+                                                AssistChip(
+                                                    onClick = {},
+                                                    label = { Text("${stat.commandKey} (${stat.usageCount}x)", style = MaterialTheme.typography.labelSmall) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (memoryFacts.isEmpty()) {
+                            item {
+                                HudGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Psychology, contentDescription = null, tint = hud.primaryGlow)
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Long-Term Memory Is Ready", style = MaterialTheme.typography.titleMedium, color = hud.textPrimary)
+                                        }
+                                        Text(
+                                            text = "Say things like \"Remember my project is Jarvis 2.0\" or \"Always reply short\", or tap + to add preferences manually.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = hud.textSecondary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        items(memoryFacts, key = { it.id }) { fact ->
+                            HudGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "${fact.category.uppercase()} • ${fact.factKey}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = hud.primaryGlow
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = fact.factValue,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = hud.textPrimary
+                                        )
+                                    }
+                                    IconButton(onClick = { editingFact = fact }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit memory fact", tint = hud.primaryGlow)
+                                    }
+                                    IconButton(onClick = { viewModel.deleteMemoryFact(fact.id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete memory fact", tint = hud.errorCrimson)
+                                    }
+                                }
+                            }
+                        }
+                        item { Spacer(modifier = Modifier.height(80.dp)) }
+                    }
+                }
+
+                3 -> {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         item {
                             HudGlassCard(modifier = Modifier.fillMaxWidth()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text("DATA PORTABILITY", style = MaterialTheme.typography.labelMedium, color = hud.primaryGlow)
                                     Text(
-                                        text = "Export your notes, reminders, and personalization preferences to a JSON file, or restore a previous backup. API keys are never exported.",
+                                        text = "Export your notes, reminders, long-term memory facts, and preferences to JSON, or restore an existing backup. API keys are never exported.",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = hud.textSecondary
                                     )
@@ -296,7 +388,7 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
                                     ) {
                                         Icon(Icons.Default.DeleteForever, contentDescription = null, tint = hud.errorCrimson)
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Delete All Notes & Reminders", color = hud.errorCrimson)
+                                        Text("Delete All Notes, Alerts & Brain Facts", color = hud.errorCrimson)
                                     }
                                 }
                             }
@@ -358,11 +450,67 @@ fun MemoryScreen(viewModel: MemoryViewModel = viewModel()) {
         )
     }
 
+    if (showAddFact) {
+        var category by remember { mutableStateOf("Preference") }
+        var key by remember { mutableStateOf("") }
+        var value by remember { mutableStateOf("") }
+        val categories = listOf("Preference", "Project", "Instruction", "Personal")
+        AlertDialog(
+            onDismissRequest = { showAddFact = false },
+            title = { Text("Add Long-Term Memory") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        categories.forEach { cat ->
+                            FilterChip(selected = category == cat, onClick = { category = cat }, label = { Text(cat) })
+                        }
+                    }
+                    OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("Topic / Key (e.g. Favorite Language)") }, singleLine = true)
+                    OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text("Detail to remember") }, minLines = 2)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.addMemoryFact(category, key, value)
+                    showAddFact = false
+                }) { Text("Save Fact") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddFact = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    editingFact?.let { fact ->
+        var updatedVal by remember(fact.id) { mutableStateOf(fact.factValue) }
+        AlertDialog(
+            onDismissRequest = { editingFact = null },
+            title = { Text("Edit ${fact.factKey}") },
+            text = {
+                OutlinedTextField(
+                    value = updatedVal,
+                    onValueChange = { updatedVal = it },
+                    label = { Text("Saved detail") },
+                    minLines = 2
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.updateMemoryFact(fact, updatedVal)
+                    editingFact = null
+                }) { Text("Update") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingFact = null }) { Text("Cancel") }
+            }
+        )
+    }
+
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
             title = { Text("Delete All Memories?") },
-            text = { Text("This permanently deletes all saved notes and reminders from this device.") },
+            text = { Text("This permanently deletes all saved notes, reminders, and long-term memory facts from this device.") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.clearAllMemories()

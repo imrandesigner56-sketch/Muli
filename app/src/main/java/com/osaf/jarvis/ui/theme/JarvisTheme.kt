@@ -41,19 +41,19 @@ data class JarvisHudColors(
 )
 
 val SimpleDarkColors = JarvisHudColors(
-    spaceBlack = Color(0xFF0E1117),
-    deepNavy = Color(0xFF171B24),
-    glassSurface = Color(0xFF1D222E),
-    primaryGlow = Color(0xFF7EB6FF),
-    secondaryGlow = Color(0xFF9D8CFF),
-    onlineGreen = Color(0xFF4ADE80),
+    spaceBlack = Color(0xFF05080F),
+    deepNavy = Color(0xFF0D1422),
+    glassSurface = Color(0xFF121C2E),
+    primaryGlow = Color(0xFF38BDF8),
+    secondaryGlow = Color(0xFF2563EB),
+    onlineGreen = Color(0xFF34D399),
     warningAmber = Color(0xFFFBBF24),
     errorCrimson = Color(0xFFF87171),
     offlineSteel = Color(0xFF64748B),
-    borderCyan = Color(0xFF2B3345),
+    borderCyan = Color(0xFF1E2D47),
     textPrimary = Color(0xFFF1F5F9),
     textSecondary = Color(0xFF94A3B8),
-    onPrimaryAccent = Color(0xFF091526),
+    onPrimaryAccent = Color(0xFF031322),
     isSimpleTheme = true,
     isLight = false
 )

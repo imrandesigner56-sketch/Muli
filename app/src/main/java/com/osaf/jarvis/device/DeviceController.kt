@@ -89,7 +89,6 @@ class DeviceController(private val context: Context) {
     init {
         initTorch()
         registerNetworkMonitor()
-        refreshInstalledApps()
     }
 
     private fun initTorch() {
